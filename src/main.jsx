@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { loadPlayers, ATTRS, fmtHeight, posList } from './players.js'
+import { loadPlayers, ATTRS, GROUPS, fmtHeight, posList } from './players.js'
 
 let players = []
 
@@ -160,7 +160,7 @@ function Card({ p }) {
 
 function Table({ rows }) {
   const td = { padding: '10px 12px', borderBottom: `1px solid ${C.border}`, textAlign: 'left', fontSize: 14 }
-  const cols = ['Shot 3PT', 'Driving Dunk', 'Ball Handle', 'Perimeter Defense', 'Block']
+  const cols = ['Three-Point Shot', 'Driving Dunk', 'Ball Handle', 'Perimeter Defense', 'Block']
   return (
     <div style={{ overflowX: 'auto', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -271,13 +271,20 @@ function Detail({ slug }) {
       </div>
       <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
         <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>Attributes</h2>
-        <p style={{ margin: '0 0 16px', color: C.mute, fontSize: 13 }}>Ratings not entered yet show “—”. Add columns with these names to public/players.csv.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: '12px 24px' }}>
-          {ATTRS.map(a => (
-            <div key={a} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{a}</span><strong>{p.attrs[a] ?? '—'}</strong></div>
-              <div style={{ height: 6, background: C.bg, borderRadius: 3 }}><div style={{ width: `${p.attrs[a] ?? 0}%`, height: '100%', borderRadius: 3, background: tier(p.attrs[a]) }} /></div>
-            </div>
+        <p style={{ margin: '0 0 20px', color: C.mute, fontSize: 13 }}>Ratings not entered yet show “—”. Fill them in via public/players.csv.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {Object.entries(GROUPS).map(([g, list]) => (
+            <section key={g} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase', letterSpacing: '.06em', color: C.accent }}>{g}</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: '12px 24px' }}>
+                {list.map(a => (
+                  <div key={a} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{a}</span><strong>{p.attrs[a] ?? '—'}</strong></div>
+                    <div style={{ height: 6, background: C.bg, borderRadius: 3 }}><div style={{ width: `${p.attrs[a] ?? 0}%`, height: '100%', borderRadius: 3, background: tier(p.attrs[a]) }} /></div>
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </div>

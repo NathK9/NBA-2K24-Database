@@ -2,14 +2,18 @@ import Papa from 'papaparse'
 
 // Player data lives in public/players.csv — edit it in any spreadsheet app.
 // Columns: name, positions, team, height (inches), overall (blank = unrated), image (optional path/URL)
-// Any extra column whose header matches an attribute name below (e.g. "Shot 3PT") is used as that rating.
+// Any extra column whose header matches an attribute name below (e.g. "Three-Point Shot") is used as that rating.
 
-export const ATTRS = [
-  'Shot Close', 'Shot Mid', 'Shot 3PT', 'Free Throw', 'Driving Layup', 'Driving Dunk',
-  'Standing Dunk', 'Post Control', 'Pass Accuracy', 'Ball Handle', 'Speed', 'Acceleration',
-  'Strength', 'Vertical', 'Stamina', 'Interior Defense', 'Perimeter Defense', 'Steal',
-  'Block', 'Off. Rebound', 'Def. Rebound',
-]
+export const GROUPS = {
+  'Inside Scoring': ['Close Shot', 'Driving Layup', 'Driving Dunk', 'Standing Dunk', 'Post Control', 'Post Hook', 'Post Fade', 'Draw Foul'],
+  'Outside Scoring': ['Mid-Range Shot', 'Three-Point Shot', 'Free Throw', 'Shot IQ', 'Offensive Consistency'],
+  'Playmaking': ['Ball Handle', 'Speed With Ball', 'Pass Accuracy', 'Pass IQ', 'Pass Vision'],
+  'Defense': ['Interior Defense', 'Perimeter Defense', 'Steal', 'Block', 'Help Defense IQ', 'Pass Perception', 'Defensive Consistency', 'Lateral Quickness / Agility'],
+  'Rebounding': ['Offensive Rebound', 'Defensive Rebound'],
+  'Athleticism': ['Speed', 'Acceleration', 'Strength', 'Vertical', 'Stamina', 'Hustle', 'Durability'],
+  'Other': ['Intangibles', 'Potential'],
+}
+export const ATTRS = Object.values(GROUPS).flat()
 
 export const slug = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 export const fmtHeight = h => h ? `${Math.floor(h / 12)}'${h % 12}"` : '—'
