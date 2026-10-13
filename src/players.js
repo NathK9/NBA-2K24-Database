@@ -1,0 +1,21 @@
+// Sample NBA 2K24 launch ratings (illustrative dataset)
+export const players = [
+  { name: 'Nikola Jokic', team: 'Nuggets', pos: 'C', ovr: 98, three: 78, dunk: 60, def: 80 },
+  { name: 'Giannis Antetokounmpo', team: 'Bucks', pos: 'PF', ovr: 97, three: 65, dunk: 98, def: 90 },
+  { name: 'Joel Embiid', team: '76ers', pos: 'C', ovr: 96, three: 78, dunk: 85, def: 88 },
+  { name: 'Kevin Durant', team: 'Suns', pos: 'PF', ovr: 96, three: 88, dunk: 80, def: 78 },
+  { name: 'Stephen Curry', team: 'Warriors', pos: 'PG', ovr: 96, three: 99, dunk: 30, def: 65 },
+  { name: 'Luka Doncic', team: 'Mavericks', pos: 'PG', ovr: 95, three: 85, dunk: 50, def: 60 },
+  { name: 'Jayson Tatum', team: 'Celtics', pos: 'SF', ovr: 95, three: 85, dunk: 80, def: 82 },
+  { name: 'LeBron James', team: 'Lakers', pos: 'SF', ovr: 95, three: 78, dunk: 90, def: 75 },
+  { name: 'Shai Gilgeous-Alexander', team: 'Thunder', pos: 'PG', ovr: 93, three: 76, dunk: 70, def: 80 },
+  { name: 'Jimmy Butler', team: 'Heat', pos: 'SF', ovr: 93, three: 70, dunk: 75, def: 88 },
+  { name: 'Anthony Davis', team: 'Lakers', pos: 'PF', ovr: 93, three: 65, dunk: 92, def: 93 },
+  { name: 'Devin Booker', team: 'Suns', pos: 'SG', ovr: 93, three: 88, dunk: 70, def: 65 },
+  { name: 'Donovan Mitchell', team: 'Cavaliers', pos: 'SG', ovr: 90, three: 86, dunk: 82, def: 68 },
+  { name: 'Damian Lillard', team: 'Bucks', pos: 'PG', ovr: 90, three: 93, dunk: 55, def: 55 },
+  { name: 'Anthony Edwards', team: 'Timberwolves', pos: 'SG', ovr: 87, three: 82, dunk: 92, def: 75 },
+  { name: 'Ja Morant', team: 'Grizzlies', pos: 'PG', ovr: 89, three: 70, dunk: 95, def: 60 },
+  { name: 'Trae Young', team: 'Hawks', pos: 'PG', ovr: 88, three: 88, dunk: 25, def: 45 },
+  { name: 'Victor Wembanyama', team: 'Spurs', pos: 'C', ovr: 84, three: 72, dunk: 85, def: 88 },
+]

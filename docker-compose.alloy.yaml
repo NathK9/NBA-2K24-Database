@@ -1,0 +1,10 @@
+services:
+  site:
+    image: node:22-bookworm
+    working_dir: /workspace
+    network_mode: host
+    volumes:
+      - .:/workspace
+    environment:
+      IS_ALLOY: ${IS_ALLOY:-false}
+    command: bash -lc "npm install && npm run dev"
