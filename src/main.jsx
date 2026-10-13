@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { players, ATTRS, fmtHeight } from './players.js'
+import { loadPlayers, ATTRS, fmtHeight, posList } from './players.js'
+
+let players = []
 
 const C = { bg: '#0b0d12', panel: '#141821', border: '#232836', text: '#e8eaf0', mute: '#8b93a7', accent: '#f5a524' }
-const PER_PAGE = 24
+const PER_PAGE = 48
 const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C']
-const ROSTERS = ['Current NBA (September 2023)', 'Offseason NBA (September 2023)', 'WNBA (September 2023)']
+const ROSTERS = ['NBA 2023-24 Season', 'Offseason NBA (September 2023)', 'WNBA (September 2023)']
 const SORTS = [['roster', 'Roster order'], ['ovr-d', 'OVR ↓'], ['ovr-a', 'OVR ↑'], ['name', 'Name'], ['h-d', 'Height ↓'], ['h-a', 'Height ↑'], ...ATTRS.map(a => ['attr:' + a, a])]
 
-const tier = o => o >= 90 ? '#c084fc' : o >= 85 ? '#38bdf8' : o >= 80 ? '#f5a524' : o >= 75 ? '#94a3b8' : '#a16207'
+const tier = o => o == null ? '#3a4152' : o >= 90 ? '#c084fc' : o >= 85 ? '#38bdf8' : o >= 80 ? '#f5a524' : o >= 75 ? '#94a3b8' : '#a16207'
 const initials = n => n.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
 const css = `
@@ -73,6 +75,8 @@ function Footer() {
 }
 
 function Avatar({ p, size, fill }) {
+  const [bad, setBad] = useState(false)
+  if (p.img && !bad) return <img src={p.img} alt={p.name} onError={() => setBad(true)} style={{ width: fill ? '100%' : size, height: size, objectFit: 'cover', borderRadius: 8, background: '#1a1f2b' }} />
   return (
     <div style={{ width: fill ? '100%' : size, height: size, borderRadius: 8, background: `linear-gradient(160deg, #222838, #151922)`, display: 'grid', placeItems: 'center', fontSize: size / 3, fontWeight: 800, color: '#5b6478' }}>
       {initials(p.name)}
@@ -81,7 +85,7 @@ function Avatar({ p, size, fill }) {
 }
 
 function Ovr({ v, big }) {
-  return <span style={{ background: tier(v), color: '#0b0d12', fontWeight: 800, borderRadius: 6, padding: big ? '6px 12px' : '2px 8px', fontSize: big ? 28 : 15 }}>{v}</span>
+  return <span style={{ background: tier(v), color: '#0b0d12', fontWeight: 800, borderRadius: 6, padding: big ? '6px 12px' : '2px 8px', fontSize: big ? 28 : 15 }}>{v ?? '—'}</span>
 }
 
 function Filters({ f, set, teams, reset }) {
@@ -165,7 +169,7 @@ function Table({ rows }) {
           <tr key={p.id} className="row" style={{ cursor: 'pointer' }} onClick={() => location.hash = `#/players/${p.slug}`}>
             <td style={td}><Ovr v={p.ovr} /></td><td style={{ ...td, fontWeight: 600 }}>{p.name}</td><td style={td}>{p.pos}</td>
             <td style={{ ...td, color: C.mute }}>{p.team}</td><td style={td}>{fmtHeight(p.height)}</td>
-            {cols.map(c => <td key={c} style={td}>{p.attrs[c]}</td>)}
+            {cols.map(c => <td key={c} style={td}>{p.attrs[c] ?? '—'}</td>)}
           </tr>))}</tbody>
       </table>
     </div>
@@ -203,13 +207,14 @@ function Browse() {
   const rows = useMemo(() => {
     let r = players.filter(p =>
       (!f.team || p.team === f.team) &&
-      (!f.pos.length || f.pos.some(x => p.pos.split('/').includes(x))) &&
+      (!f.pos.length || f.pos.some(x => posList(p.pos).includes(x))) &&
       p.name.toLowerCase().includes(f.q.toLowerCase()) &&
-      (!f.min || p.ovr >= +f.min) && (!f.max || p.ovr <= +f.max) && (!f.h || p.height >= +f.h))
+      (!f.min || (p.ovr ?? -1) >= +f.min) && (!f.max || (p.ovr != null && p.ovr <= +f.max)) && (!f.h || p.height >= +f.h))
+    const nl = (x, y, d) => x == null ? (y == null ? 0 : 1) : y == null ? -1 : (x - y) * d
     const by = {
-      'ovr-d': (a, b) => b.ovr - a.ovr, 'ovr-a': (a, b) => a.ovr - b.ovr, name: (a, b) => a.name.localeCompare(b.name),
+      'ovr-d': (a, b) => nl(a.ovr, b.ovr, -1), 'ovr-a': (a, b) => nl(a.ovr, b.ovr, 1), name: (a, b) => a.name.localeCompare(b.name),
       'h-d': (a, b) => b.height - a.height, 'h-a': (a, b) => a.height - b.height,
-    }[sort] || (sort.startsWith('attr:') ? (a, b) => b.attrs[sort.slice(5)] - a.attrs[sort.slice(5)] : null)
+    }[sort] || (sort.startsWith('attr:') ? (a, b) => nl(a.attrs[sort.slice(5)], b.attrs[sort.slice(5)], -1) : null)
     return by ? [...r].sort(by) : r
   }, [f, sort])
   const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE))
@@ -219,9 +224,9 @@ function Browse() {
   return (
     <>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-        <div style={{ fontSize: 14, color: C.mute }}>MyNBA / Rosters / <span style={{ color: C.text }}>Current NBA (September 2023)</span></div>
-        <h1 style={{ margin: 0, fontSize: 32 }}>Current NBA (September 2023)</h1>
-        <div style={{ color: C.mute, fontSize: 14 }}>NBA · {players.length} players · {teams.length} teams · captured Sep 8, 2023</div>
+        <div style={{ fontSize: 14, color: C.mute }}>MyNBA / Rosters / <span style={{ color: C.text }}>2023-24 Season</span></div>
+        <h1 style={{ margin: 0, fontSize: 32 }}>NBA 2K24 Players · 2023-24 Season</h1>
+        <div style={{ color: C.mute, fontSize: 14 }}>NBA · {players.length} players · {teams.length} teams · 2023-24 season</div>
       </div>
       <div className="layout">
         <Filters f={f} set={set} teams={teams} reset={() => set(empty)} />
@@ -266,12 +271,12 @@ function Detail({ slug }) {
       </div>
       <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
         <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>Attributes</h2>
-        <p style={{ margin: '0 0 16px', color: C.mute, fontSize: 13 }}>Placeholder values — replace in src/players.js with real ratings.</p>
+        <p style={{ margin: '0 0 16px', color: C.mute, fontSize: 13 }}>Ratings not entered yet show “—”. Add columns with these names to public/players.csv.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: '12px 24px' }}>
           {ATTRS.map(a => (
             <div key={a} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{a}</span><strong>{p.attrs[a]}</strong></div>
-              <div style={{ height: 6, background: C.bg, borderRadius: 3 }}><div style={{ width: `${p.attrs[a]}%`, height: '100%', borderRadius: 3, background: tier(p.attrs[a]) }} /></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{a}</span><strong>{p.attrs[a] ?? '—'}</strong></div>
+              <div style={{ height: 6, background: C.bg, borderRadius: 3 }}><div style={{ width: `${p.attrs[a] ?? 0}%`, height: '100%', borderRadius: 3, background: tier(p.attrs[a]) }} /></div>
             </div>
           ))}
         </div>
@@ -282,12 +287,15 @@ function Detail({ slug }) {
 
 function App() {
   const h = useHash()
+  const [ready, setReady] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { loadPlayers().then(p => { players = p; setReady(true) }).catch(e => setErr(String(e))) }, [])
   const m = h.match(/^#\/players\/(.+)$/)
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'Inter, system-ui, sans-serif' }}>
       <style>{css}</style>
       <Header />
-      <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>{m ? <Detail slug={m[1]} /> : <Browse />}</main>
+      <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>{err ? <p style={{ color: '#f87171' }}>Couldn't load players.csv: {err}</p> : !ready ? <p style={{ color: C.mute }}>Loading players…</p> : m ? <Detail slug={m[1]} /> : <Browse />}</main>
       <Footer />
     </div>
   )

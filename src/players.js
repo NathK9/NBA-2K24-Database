@@ -1,56 +1,8 @@
-// Roster: Current NBA (September 2023). Basic facts per player:
-// [name, positions, team, height in inches, overall]
-// Extend this list (or replace with an imported CSV/JSON) to add more players.
-const raw = [
-  ['James Harden', 'PG/SG', 'Philadelphia 76ers', 77, 89],
-  ['Tyrese Maxey', 'SG/PG', 'Philadelphia 76ers', 74, 85],
-  ['Tobias Harris', 'SF/PF', 'Philadelphia 76ers', 79, 81],
-  ['P.J. Tucker', 'PF/SF', 'Philadelphia 76ers', 77, 75],
-  ['Joel Embiid', 'C', 'Philadelphia 76ers', 84, 96],
-  ['Furkan Korkmaz', 'SG/SF', 'Philadelphia 76ers', 79, 70],
-  ['Patrick Beverley', 'PG/SG', 'Philadelphia 76ers', 74, 76],
-  ["De'Anthony Melton", 'SG/PG', 'Philadelphia 76ers', 74, 78],
-  ['Mohamed Bamba', 'C', 'Philadelphia 76ers', 84, 76],
-  ['Danuel House', 'SF/PF', 'Philadelphia 76ers', 78, 73],
-  ['Montrezl Harrell', 'C', 'Philadelphia 76ers', 79, 75],
-  ['Paul Reed', 'PF/C', 'Philadelphia 76ers', 81, 76],
-  ['Jaden Springer', 'SG/PG', 'Philadelphia 76ers', 76, 70],
-  ['Filip Petrusev', 'PF/C', 'Philadelphia 76ers', 83, 70],
-  ['Jrue Holiday', 'PG/SG', 'Milwaukee Bucks', 77, 87],
-  ['Grayson Allen', 'SG/SF', 'Milwaukee Bucks', 76, 75],
-  ['Khris Middleton', 'SF/PF', 'Milwaukee Bucks', 79, 85],
-  ['Giannis Antetokounmpo', 'PF/SF', 'Milwaukee Bucks', 84, 96],
-  ['Brook Lopez', 'C', 'Milwaukee Bucks', 85, 84],
-  ['Bobby Portis Jr.', 'C/PF', 'Milwaukee Bucks', 83, 82],
-  ['Pat Connaughton', 'SF/SG', 'Milwaukee Bucks', 77, 75],
-  ['Jae Crowder', 'PF/SF', 'Milwaukee Bucks', 78, 75],
-  ['Malik Beasley', 'SG/SF', 'Milwaukee Bucks', 76, 75],
-  ['MarJon Beauchamp', 'SF/SG', 'Milwaukee Bucks', 79, 73],
-  ['Robin Lopez', 'C', 'Milwaukee Bucks', 84, 73],
-  ['A.J. Green', 'SG/SF', 'Milwaukee Bucks', 77, 71],
-  ['Andre Jackson Jr.', 'SG/SF', 'Milwaukee Bucks', 78, 70],
-  ['Chris Livingston', 'SF/PF', 'Milwaukee Bucks', 78, 69],
-  ['Lindell Wigginton', 'PG/SG', 'Milwaukee Bucks', 73, 70],
-  ['Lonzo Ball', 'PG/SG', 'Chicago Bulls', 78, 81],
-  ['Alex Caruso', 'SG/SF', 'Chicago Bulls', 77, 78],
-  ['Zach LaVine', 'SF/SG', 'Chicago Bulls', 77, 86],
-  ['DeMar DeRozan', 'PF/SF', 'Chicago Bulls', 78, 86],
-  ['Nikola Vucevic', 'C', 'Chicago Bulls', 82, 84],
-  ['Andre Drummond', 'C', 'Chicago Bulls', 83, 77],
-  ['Ayo Dosunmu', 'PG/SG', 'Chicago Bulls', 77, 74],
-  ['Jevon Carter', 'PG/SG', 'Chicago Bulls', 73, 75],
-  ['Patrick Williams', 'PF/SF', 'Chicago Bulls', 79, 77],
-  ['Torrey Craig', 'PF/SF', 'Chicago Bulls', 79, 75],
-  ['Coby White', 'SG/PG', 'Chicago Bulls', 77, 76],
-  ['Dalen Terry', 'SF/SG', 'Chicago Bulls', 79, 72],
-  ['Carlik Jones', 'PG/SG', 'Chicago Bulls', 72, 67],
-  ['Darius Garland', 'PG/SG', 'Cleveland Cavaliers', 73, 86],
-  ['Donovan Mitchell', 'SG/PG', 'Cleveland Cavaliers', 73, 92],
-  ['Isaac Okoro', 'SF/SG', 'Cleveland Cavaliers', 77, 76],
-  ['Evan Mobley', 'PF/C', 'Cleveland Cavaliers', 83, 85],
-  ['Jarrett Allen', 'C', 'Cleveland Cavaliers', 81, 83],
-  ['Caris LeVert', 'SG/SF', 'Cleveland Cavaliers', 78, 78],
-]
+import Papa from 'papaparse'
+
+// Player data lives in public/players.csv — edit it in any spreadsheet app.
+// Columns: name, positions, team, height (inches), overall (blank = unrated), image (optional path/URL)
+// Any extra column whose header matches an attribute name below (e.g. "Shot 3PT") is used as that rating.
 
 export const ATTRS = [
   'Shot Close', 'Shot Mid', 'Shot 3PT', 'Free Throw', 'Driving Layup', 'Driving Dunk',
@@ -59,29 +11,28 @@ export const ATTRS = [
   'Block', 'Off. Rebound', 'Def. Rebound',
 ]
 
-// Placeholder attribute values derived from overall + position.
-// Replace with real values when you have a data source.
-function seed(str) {
-  let h = 0
-  for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return () => ((h = (h * 1103515245 + 12345) >>> 0) % 1000) / 1000
-}
-function attrsFor(name, pos, ovr) {
-  const r = seed(name)
-  const big = pos.startsWith('C') || pos.startsWith('PF')
-  const bigBias = ['Standing Dunk', 'Post Control', 'Strength', 'Interior Defense', 'Block', 'Off. Rebound', 'Def. Rebound']
-  const smallBias = ['Shot 3PT', 'Ball Handle', 'Speed', 'Acceleration', 'Pass Accuracy', 'Perimeter Defense', 'Steal']
-  return Object.fromEntries(ATTRS.map(a => {
-    let v = ovr - 12 + Math.round(r() * 20)
-    if (bigBias.includes(a)) v += big ? 8 : -12
-    if (smallBias.includes(a)) v += big ? -12 : 6
-    return [a, Math.max(25, Math.min(99, v))]
-  }))
-}
+export const slug = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+export const fmtHeight = h => h ? `${Math.floor(h / 12)}'${h % 12}"` : '—'
 
-export const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
-export const fmtHeight = h => `${Math.floor(h / 12)}'${h % 12}"`
+// Generic positions (G/F/C) count as both specific spots for filtering.
+const EXPAND = { G: ['PG', 'SG'], F: ['SF', 'PF'], 'G-F': ['SG', 'SF'], 'F-C': ['PF', 'C'] }
+export const posList = pos => pos.split('/').flatMap(p => EXPAND[p] || [p])
 
-export const players = raw.map(([name, pos, team, height, ovr], i) => ({
-  id: i, name, pos, team, height, ovr, slug: slug(name), attrs: attrsFor(name, pos, ovr),
-}))
+const num = v => (v === undefined || v === null || String(v).trim() === '' ? null : Number(v))
+
+export async function loadPlayers() {
+  const text = await fetch('/players.csv').then(r => r.text())
+  const { data, errors } = Papa.parse(text, { header: true, skipEmptyLines: true })
+  if (errors.length) console.warn('players.csv parse warnings:', errors.slice(0, 5))
+  const seen = {}
+  return data.filter(r => r.name).map((r, i) => {
+    let s = slug(r.name)
+    seen[s] = (seen[s] || 0) + 1
+    if (seen[s] > 1) s += '-' + seen[s]
+    return {
+      id: i, name: r.name.trim(), pos: (r.positions || '').trim(), team: (r.team || '').trim(),
+      height: num(r.height), ovr: num(r.overall), img: (r.image || '').trim(), slug: s,
+      attrs: Object.fromEntries(ATTRS.map(a => [a, num(r[a])])),
+    }
+  })
+}
