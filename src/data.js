@@ -355,6 +355,11 @@ export function dailyTarget(dateKey = todayKey()) {
   return { ...TARGETS[i], id: 'target-' + dateKey }
 }
 
+export function targetAt(index) {
+  const t = TARGETS[((index % TARGETS.length) + TARGETS.length) % TARGETS.length]
+  return { ...t, id: 'target-u-' + index }
+}
+
 export function pickHand(dateKey, round, excludeIds, rand = rng(hashStr(dateKey + ':r' + round))) {
   const pool = SEASONS.filter(s => !excludeIds.has(s.id))
   const out = []
