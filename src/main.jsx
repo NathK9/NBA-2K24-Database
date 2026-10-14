@@ -522,9 +522,10 @@ function applyNudge(statKey, value, nudge) {
 
 function LegendPicker({ onPick, onClose }) {
   const [q, setQ] = useState('')
-  const list = TARGETS.filter(t =>
-    !q || `${t.name} ${t.team} ${t.season}`.toLowerCase().includes(q.toLowerCase())
-  )
+  const list = TARGETS
+    .map((t, idx) => ({ t, idx }))
+    .filter(({ t }) => !q || `${t.name} ${t.team} ${t.season}`.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => a.t.name.localeCompare(b.t.name) || a.t.season.localeCompare(b.t.season))
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(5,7,14,.8)', zIndex: 50,
@@ -536,7 +537,12 @@ function LegendPicker({ onPick, onClose }) {
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, fontFamily: 'Archivo, sans-serif', fontSize: 20 }}>Pick a legend</h2>
+          <div>
+            <h2 style={{ margin: 0, fontFamily: 'Archivo, sans-serif', fontSize: 20 }}>Pick a legend</h2>
+            <div style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
+              {list.length} of {TARGETS.length} seasons
+            </div>
+          </div>
           <button onClick={onClose} style={{ background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 8, width: 32, height: 32 }}>×</button>
         </div>
         <input
@@ -549,26 +555,23 @@ function LegendPicker({ onPick, onClose }) {
           }}
         />
         <div style={{ overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {list.map((t, i) => {
-            const idx = TARGETS.indexOf(t)
-            return (
-              <button
-                key={t.name + t.season + i}
-                onClick={() => onPick(idx)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
-                  borderRadius: 10, border: `1px solid ${C.border}`, background: C.panel2, textAlign: 'left',
-                }}
-              >
-                <Avatar name={t.name} size={36} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{t.name}</div>
-                  <div style={{ fontSize: 12, color: C.mute }}>{t.pos} · {t.team} · {t.season}</div>
-                </div>
-                <span style={{ fontSize: 12, color: C.gold, fontWeight: 700 }}>{t.stats.PPG} PPG</span>
-              </button>
-            )
-          })}
+          {list.map(({ t, idx }) => (
+            <button
+              key={t.name + t.season + idx}
+              onClick={() => onPick(idx)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
+                borderRadius: 10, border: `1px solid ${C.border}`, background: C.panel2, textAlign: 'left',
+              }}
+            >
+              <Avatar name={t.name} size={36} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{t.name}</div>
+                <div style={{ fontSize: 12, color: C.mute }}>{t.pos} · {t.team} · {t.season}</div>
+              </div>
+              <span style={{ fontSize: 12, color: C.gold, fontWeight: 700 }}>{t.stats.PPG} PPG</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
