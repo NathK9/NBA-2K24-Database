@@ -1,311 +1,715 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { loadPlayers, ATTRS, GROUPS, fmtHeight, posList } from './players.js'
+import {
+  STATS, dailyTarget, pickHand, scoreBeat, grade, didBeat,
+  initials, todayKey, hashStr,
+} from './data.js'
 
-let players = []
-
-const C = { bg: '#0b0d12', panel: '#141821', border: '#232836', text: '#e8eaf0', mute: '#8b93a7', accent: '#f5a524' }
-const PER_PAGE = 48
-const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C']
-const ROSTERS = ['NBA 2023-24 Season', 'Offseason NBA (September 2023)', 'WNBA (September 2023)']
-const SORTS = [['roster', 'Roster order'], ['ovr-d', 'OVR ↓'], ['ovr-a', 'OVR ↑'], ['name', 'Name'], ['h-d', 'Height ↓'], ['h-a', 'Height ↑'], ...ATTRS.map(a => ['attr:' + a, a])]
-
-const tier = o => o == null ? '#3a4152' : o >= 90 ? '#c084fc' : o >= 85 ? '#38bdf8' : o >= 80 ? '#f5a524' : o >= 75 ? '#94a3b8' : '#a16207'
-const initials = n => n.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-
-const css = `
-  * { box-sizing: border-box }
-  a { color: inherit; text-decoration: none }
-  .card { transition: border-color .15s, background .15s }
-  .card:hover { border-color: ${C.accent} !important; background: #1a1f2b !important }
-  .chip:hover, .pg:hover { border-color: ${C.accent} !important }
-  .row:hover td { background: #1a1f2b }
-  .layout { display: grid; grid-template-columns: 260px 1fr; gap: 24px }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr } }
-  input, select, button { font: inherit; color: inherit }
-`
-const field = { width: '100%', padding: '8px 10px', background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text }
-const label = { fontSize: 12, textTransform: 'uppercase', letterSpacing: '.06em', color: C.mute, fontWeight: 600 }
-
-function useHash() {
-  const [h, setH] = useState(location.hash)
-  useEffect(() => { const f = () => { setH(location.hash); scrollTo(0, 0) }; addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
-  return h
+const C = {
+  bg: '#0a0c14',
+  panel: '#12162a',
+  panel2: '#181d36',
+  border: '#2a3150',
+  text: '#eef1ff',
+  mute: '#8b93b8',
+  gold: '#f5b942',
+  goldDim: '#c48a1a',
+  green: '#34d399',
+  red: '#f87171',
+  blue: '#60a5fa',
+  purple: '#a78bfa',
+  hero: 'linear-gradient(135deg, #1a1040 0%, #2d1b69 45%, #0f172a 100%)',
+  accent: '#f5b942',
 }
 
-function Header() {
+const STORAGE = 'beat-the-legend-v1'
+const ONBOARD = 'beat-the-legend-onboard'
+
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box }
+  button, input { font: inherit; color: inherit }
+  button { cursor: pointer }
+  button:disabled { cursor: not-allowed; opacity: .45 }
+  ::selection { background: ${C.gold}; color: #111 }
+  .stat-btn { transition: transform .12s, border-color .12s, background .12s, box-shadow .12s }
+  .stat-btn:hover:not(:disabled) { transform: translateY(-1px); border-color: ${C.gold} }
+  .stat-btn.on { border-color: ${C.gold}; background: rgba(245,185,66,.12); box-shadow: 0 0 0 1px ${C.gold} }
+  .stat-btn.locked { opacity: .7 }
+  .player-btn { transition: border-color .12s, background .12s, transform .12s }
+  .player-btn:hover:not(:disabled) { border-color: ${C.gold}; background: #1c2240 }
+  .player-btn.on { border-color: ${C.gold}; background: rgba(245,185,66,.1) }
+  .power { transition: border-color .12s, background .12s }
+  .power:hover:not(:disabled) { border-color: ${C.purple}; background: rgba(167,139,250,.1) }
+  .lock-btn { transition: filter .12s, transform .12s }
+  .lock-btn:not(:disabled):hover { filter: brightness(1.08); transform: translateY(-1px) }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+  .pop { animation: pop .28s ease both }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .7 } }
+  .pulse { animation: pulse 1.6s ease infinite }
+`
+
+function loadSave(dateKey) {
+  try {
+    const raw = localStorage.getItem(STORAGE)
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    if (data.dateKey !== dateKey) return null
+    return data
+  } catch { return null }
+}
+
+function saveGame(state) {
+  try { localStorage.setItem(STORAGE, JSON.stringify(state)) } catch {}
+}
+
+function Avatar({ name, size = 48, glow }) {
+  const colors = ['#7c3aed', '#2563eb', '#db2777', '#059669', '#d97706', '#dc2626']
+  const bg = colors[hashStr(name) % colors.length]
   return (
-    <header style={{ background: '#07090d', borderBottom: `1px solid ${C.border}` }}>
-      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 24 }}>
-        <a href="#" style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 18 }}>
-          <span style={{ width: 28, height: 28, borderRadius: 6, background: C.accent, color: '#111', display: 'grid', placeItems: 'center' }}>2K</span>
-          Hoops<span style={{ color: C.accent }}>DB</span>
-        </a>
-        <nav style={{ display: 'flex', gap: 4 }}>
-          {['MyTEAM', 'MyNBA'].map(t => (
-            <a key={t} href="#" style={{ padding: '6px 12px', borderRadius: 6, fontWeight: 600, fontSize: 14, background: t === 'MyNBA' ? C.panel : 'transparent', color: t === 'MyNBA' ? C.text : C.mute }}>{t}</a>
-          ))}
-        </nav>
-        <nav style={{ display: 'flex', gap: 16, fontSize: 14, color: C.mute, marginLeft: 8 }}>
-          {['Home', 'Players', 'Teams', 'Rosters', 'Compare', 'Lineup Builder', 'Tier List'].map(t => (
-            <a key={t} href="#" style={{ color: t === 'Players' ? C.text : C.mute }}>{t}</a>
-          ))}
-        </nav>
-        <button style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', cursor: 'pointer' }}>Sign in</button>
+    <div style={{
+      width: size, height: size, borderRadius: size * 0.22, flexShrink: 0,
+      background: `linear-gradient(145deg, ${bg}, #0f172a)`,
+      display: 'grid', placeItems: 'center', fontWeight: 800,
+      fontSize: size * 0.34, color: '#fff', letterSpacing: '-.02em',
+      boxShadow: glow ? `0 0 24px ${bg}66` : 'none',
+      border: '1px solid rgba(255,255,255,.12)',
+    }}>{initials(name)}</div>
+  )
+}
+
+function Header({ onHow, dateKey }) {
+  return (
+    <header style={{ borderBottom: `1px solid ${C.border}`, background: 'rgba(10,12,20,.85)', backdropFilter: 'blur(12px)', position: 'sticky', top: 0, zIndex: 20 }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10,
+            background: `linear-gradient(135deg, ${C.gold}, #f97316)`,
+            display: 'grid', placeItems: 'center', fontWeight: 900, color: '#111', fontSize: 14,
+          }}>BT</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: '-.02em', fontFamily: 'Archivo, sans-serif' }}>
+              Beat the <span style={{ color: C.gold }}>Legend</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.mute, marginTop: -1 }}>Daily NBA challenge</div>
+          </div>
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12, color: C.mute, fontVariantNumeric: 'tabular-nums' }}>{dateKey}</span>
+          <button onClick={onHow} style={{
+            padding: '7px 12px', borderRadius: 8, border: `1px solid ${C.border}`,
+            background: C.panel, color: C.text, fontSize: 13, fontWeight: 600,
+          }}>How to play</button>
+        </div>
       </div>
     </header>
   )
 }
 
-function Footer() {
-  const cols = { MyNBA: ['Home', 'Players', 'Teams', 'Rosters'], Tools: ['Compare', 'Lineup Builder', 'Tier List'], Site: ['About', 'Contact', 'Site Updates', 'Privacy Policy', 'Terms of Service'] }
+function Onboarding({ target, onDone }) {
+  const [step, setStep] = useState(0)
+  const steps = [
+    {
+      title: 'Beat the Legend',
+      body: `Today’s legend is ${target.name} (${target.season}). You’ll see nine stats from that season. Your job isn’t to match them — it’s to build a composite player that BEATS them.`,
+    },
+    {
+      title: 'Pick a player, lock a stat',
+      body: 'Each round deals five random seasons. Choose one player and assign them to an open stat. Locks are final. You don’t see their numbers until you lock — trust your hoop IQ.',
+    },
+    {
+      title: 'Higher wins (mostly)',
+      body: 'For PPG, APG, rebounds, steals, blocks, and shooting %, higher beats the target. For turnovers, lower is better. Exceed the bar for top scores.',
+    },
+    {
+      title: 'Chase a perfect 100',
+      body: 'Each lock scores 0–100. Your final score is the average of all nine. Beat the legend across the board and claim the crown.',
+    },
+  ]
+  const s = steps[step]
   return (
-    <footer style={{ borderTop: `1px solid ${C.border}`, marginTop: 48, background: '#07090d' }}>
-      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '32px 24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 24 }}>
-        {Object.entries(cols).map(([h, ls]) => (
-          <div key={h} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 14 }}>{h}</h3>
-            {ls.map(l => <a key={l} href="#" style={{ color: C.mute, fontSize: 14 }}>{l}</a>)}
-          </div>
-        ))}
-      </div>
-      <p style={{ textAlign: 'center', color: C.mute, fontSize: 12, padding: '0 0 24px', margin: 0 }}>HoopsDB — NBA 2K24 MyNBA player ratings</p>
-    </footer>
-  )
-}
-
-function Avatar({ p, size, fill }) {
-  const [bad, setBad] = useState(false)
-  if (p.img && !bad) return <img src={p.img} alt={p.name} onError={() => setBad(true)} style={{ width: fill ? '100%' : size, height: size, objectFit: 'cover', borderRadius: 8, background: '#1a1f2b' }} />
-  return (
-    <div style={{ width: fill ? '100%' : size, height: size, borderRadius: 8, background: `linear-gradient(160deg, #222838, #151922)`, display: 'grid', placeItems: 'center', fontSize: size / 3, fontWeight: 800, color: '#5b6478' }}>
-      {initials(p.name)}
-    </div>
-  )
-}
-
-function Ovr({ v, big }) {
-  return <span style={{ background: tier(v), color: '#0b0d12', fontWeight: 800, borderRadius: 6, padding: big ? '6px 12px' : '2px 8px', fontSize: big ? 28 : 15 }}>{v ?? '—'}</span>
-}
-
-function Filters({ f, set, teams, reset }) {
-  return (
-    <aside style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 18, alignSelf: 'start' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ margin: 0, fontSize: 16 }}>Filters</h2>
-        <button onClick={reset} style={{ background: 'none', border: 'none', color: C.accent, cursor: 'pointer', fontSize: 13 }}>Reset</button>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Roster</span>
-        {ROSTERS.map((r, i) => (
-          <label key={r} style={{ display: 'flex', gap: 8, fontSize: 14, color: i ? C.mute : C.text }}>
-            <input type="radio" checked={i === 0} disabled={i > 0} readOnly /> {r} <span style={{ color: C.mute }}>({i ? 0 : players.length})</span>
-          </label>
-        ))}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Team</span>
-        <select value={f.team} onChange={e => set({ team: e.target.value })} style={field}>
-          <option value="">All teams</option>
-          {teams.map(([t, n]) => <option key={t} value={t}>{t} ({n})</option>)}
-        </select>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Position</span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {POSITIONS.map(p => {
-            const on = f.pos.includes(p)
-            return <button key={p} className="chip" onClick={() => set({ pos: on ? f.pos.filter(x => x !== p) : [...f.pos, p] })}
-              style={{ flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, border: `1px solid ${on ? C.accent : C.border}`, background: on ? C.accent : C.bg, color: on ? '#111' : C.text }}>{p}</button>
-          })}
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(5,7,14,.82)', zIndex: 50,
+      display: 'grid', placeItems: 'center', padding: 20, backdropFilter: 'blur(8px)',
+    }}>
+      <div className="pop" style={{
+        width: '100%', maxWidth: 480, background: C.panel, border: `1px solid ${C.border}`,
+        borderRadius: 20, padding: 28, display: 'flex', flexDirection: 'column', gap: 18,
+        boxShadow: '0 24px 80px rgba(0,0,0,.5)',
+      }}>
+        <div style={{ fontSize: 12, color: C.gold, fontWeight: 700, letterSpacing: '.08em' }}>
+          {String(step + 1).padStart(2, '0')} / {String(steps.length).padStart(2, '0')}
         </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Search</span>
-        <input placeholder="Player name" value={f.q} onChange={e => set({ q: e.target.value })} style={field} />
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Overall</span>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input type="number" placeholder="Min" value={f.min} onChange={e => set({ min: e.target.value })} style={field} />–
-          <input type="number" placeholder="Max" value={f.max} onChange={e => set({ max: e.target.value })} style={field} />
-        </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Min height</span>
-        <select value={f.h} onChange={e => set({ h: e.target.value })} style={field}>
-          <option value="">Any</option>
-          {Array.from({ length: 16 }, (_, i) => 70 + i).map(h => <option key={h} value={h}>{fmtHeight(h)}+</option>)}
-        </select>
-      </div>
-    </aside>
-  )
-}
-
-function Card({ p }) {
-  return (
-    <a href={`#/players/${p.slug}`} className="card" style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ position: 'relative' }}>
-        <Avatar p={p} size={150} fill />
-        <span style={{ position: 'absolute', top: 8, left: 8 }}><Ovr v={p.ovr} /></span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <strong style={{ fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</strong>
-        <span style={{ fontSize: 13, color: C.mute }}>{p.pos} · {p.team}</span>
-        <span style={{ fontSize: 13, color: C.mute }}>{fmtHeight(p.height)}</span>
-      </div>
-    </a>
-  )
-}
-
-function Table({ rows }) {
-  const td = { padding: '10px 12px', borderBottom: `1px solid ${C.border}`, textAlign: 'left', fontSize: 14 }
-  const cols = ['Three-Point Shot', 'Driving Dunk', 'Ball Handle', 'Perimeter Defense', 'Block']
-  return (
-    <div style={{ overflowX: 'auto', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10 }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr>{['OVR', 'Player', 'Pos', 'Team', 'Height', ...cols].map(h => <th key={h} style={{ ...td, color: C.mute, fontSize: 12, textTransform: 'uppercase' }}>{h}</th>)}</tr></thead>
-        <tbody>{rows.map(p => (
-          <tr key={p.id} className="row" style={{ cursor: 'pointer' }} onClick={() => location.hash = `#/players/${p.slug}`}>
-            <td style={td}><Ovr v={p.ovr} /></td><td style={{ ...td, fontWeight: 600 }}>{p.name}</td><td style={td}>{p.pos}</td>
-            <td style={{ ...td, color: C.mute }}>{p.team}</td><td style={td}>{fmtHeight(p.height)}</td>
-            {cols.map(c => <td key={c} style={td}>{p.attrs[c] ?? '—'}</td>)}
-          </tr>))}</tbody>
-      </table>
-    </div>
-  )
-}
-
-function Pager({ page, pages, go }) {
-  const [to, setTo] = useState('')
-  const btn = (on, dis) => ({ minWidth: 36, padding: '6px 10px', borderRadius: 6, cursor: dis ? 'default' : 'pointer', opacity: dis ? .4 : 1, border: `1px solid ${on ? C.accent : C.border}`, background: on ? C.accent : C.panel, color: on ? '#111' : C.text, fontWeight: 600 })
-  const nums = [...new Set([1, page - 1, page, page + 1, pages])].filter(n => n >= 1 && n <= pages).sort((a, b) => a - b)
-  return (
-    <nav style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
-      <button className="pg" style={btn(false, page === 1)} disabled={page === 1} onClick={() => go(page - 1)}>Previous</button>
-      {nums.map((n, i) => <React.Fragment key={n}>{i && n - nums[i - 1] > 1 ? <span style={{ color: C.mute }}>…</span> : null}
-        <button className="pg" style={btn(n === page)} onClick={() => go(n)}>{n}</button></React.Fragment>)}
-      <button className="pg" style={btn(false, page === pages)} disabled={page === pages} onClick={() => go(page + 1)}>Next</button>
-      <span style={{ marginLeft: 12, color: C.mute, fontSize: 14, display: 'flex', gap: 6, alignItems: 'center' }}>
-        Go to <input value={to} onChange={e => setTo(e.target.value)} style={{ ...field, width: 56 }} /> of {pages}
-        <button className="pg" style={btn(false)} onClick={() => { const n = +to; if (n >= 1 && n <= pages) go(n) }}>Go</button>
-      </span>
-    </nav>
-  )
-}
-
-const empty = { team: '', pos: [], q: '', min: '', max: '', h: '' }
-
-function Browse() {
-  const [f, setF] = useState(empty)
-  const [sort, setSort] = useState('roster')
-  const [view, setView] = useState('grid')
-  const [page, setPage] = useState(1)
-  const set = o => { setF({ ...f, ...o }); setPage(1) }
-
-  const teams = useMemo(() => Object.entries(players.reduce((m, p) => (m[p.team] = (m[p.team] || 0) + 1, m), {})).sort(), [])
-  const rows = useMemo(() => {
-    let r = players.filter(p =>
-      (!f.team || p.team === f.team) &&
-      (!f.pos.length || f.pos.some(x => posList(p.pos).includes(x))) &&
-      p.name.toLowerCase().includes(f.q.toLowerCase()) &&
-      (!f.min || (p.ovr ?? -1) >= +f.min) && (!f.max || (p.ovr != null && p.ovr <= +f.max)) && (!f.h || p.height >= +f.h))
-    const nl = (x, y, d) => x == null ? (y == null ? 0 : 1) : y == null ? -1 : (x - y) * d
-    const by = {
-      'ovr-d': (a, b) => nl(a.ovr, b.ovr, -1), 'ovr-a': (a, b) => nl(a.ovr, b.ovr, 1), name: (a, b) => a.name.localeCompare(b.name),
-      'h-d': (a, b) => b.height - a.height, 'h-a': (a, b) => a.height - b.height,
-    }[sort] || (sort.startsWith('attr:') ? (a, b) => nl(a.attrs[sort.slice(5)], b.attrs[sort.slice(5)], -1) : null)
-    return by ? [...r].sort(by) : r
-  }, [f, sort])
-  const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE))
-  const shown = rows.slice((page - 1) * PER_PAGE, page * PER_PAGE)
-  const active = JSON.stringify(f) !== JSON.stringify(empty)
-
-  return (
-    <>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-        <div style={{ fontSize: 14, color: C.mute }}>MyNBA / Rosters / <span style={{ color: C.text }}>2023-24 Season</span></div>
-        <h1 style={{ margin: 0, fontSize: 32 }}>NBA 2K24 Players · 2023-24 Season</h1>
-        <div style={{ color: C.mute, fontSize: 14 }}>NBA · {players.length} players · {teams.length} teams · 2023-24 season</div>
-      </div>
-      <div className="layout">
-        <Filters f={f} set={set} teams={teams} reset={() => set(empty)} />
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 14 }}><strong>{rows.length.toLocaleString()}</strong> players
-              {!active && <span style={{ color: C.mute }}> · No filters applied — pick a team or position to narrow it down.</span>}</div>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: C.mute }}>Sort</span>
-              <select value={sort} onChange={e => { setSort(e.target.value); setPage(1) }} style={{ ...field, width: 180 }}>
-                {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-              <div style={{ display: 'flex', border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
-                {['grid', 'table'].map(v => <button key={v} onClick={() => setView(v)} style={{ padding: '8px 14px', border: 'none', cursor: 'pointer', textTransform: 'capitalize', background: view === v ? C.accent : C.panel, color: view === v ? '#111' : C.text, fontWeight: 600 }}>{v}</button>)}
-              </div>
+        <h2 style={{ margin: 0, fontSize: 26, fontFamily: 'Archivo, sans-serif', letterSpacing: '-.02em' }}>{s.title}</h2>
+        <p style={{ margin: 0, color: C.mute, lineHeight: 1.55, fontSize: 15 }}>{s.body}</p>
+        {step === 0 && (
+          <div style={{
+            display: 'flex', gap: 14, alignItems: 'center', padding: 14, borderRadius: 14,
+            background: C.hero, border: `1px solid ${C.border}`,
+          }}>
+            <Avatar name={target.name} size={52} glow />
+            <div>
+              <div style={{ fontSize: 11, color: C.mute, textTransform: 'uppercase', letterSpacing: '.06em' }}>Today’s legend</div>
+              <div style={{ fontWeight: 800, fontSize: 18 }}>{target.name}</div>
+              <div style={{ color: C.mute, fontSize: 13 }}>{target.pos} · {target.team} · {target.season}</div>
             </div>
           </div>
-          {shown.length === 0 ? <p style={{ color: C.mute, textAlign: 'center', padding: 48 }}>No players match these filters.</p>
-            : view === 'grid'
-              ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(174px,1fr))', gap: 12 }}>{shown.map(p => <Card key={p.id} p={p} />)}</div>
-              : <Table rows={shown} />}
-          <Pager page={page} pages={pages} go={n => { setPage(n); scrollTo(0, 0) }} />
-        </section>
-      </div>
-    </>
-  )
-}
-
-function Detail({ slug }) {
-  const p = players.find(x => x.slug === slug)
-  if (!p) return <p>Player not found. <a href="#" style={{ color: C.accent }}>Back to players</a></p>
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div style={{ fontSize: 14, color: C.mute }}><a href="#">MyNBA / Players</a> / <span style={{ color: C.text }}>{p.name}</span></div>
-      <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Avatar p={p} size={140} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h1 style={{ margin: 0, fontSize: 36 }}>{p.name}</h1>
-          <div style={{ color: C.mute }}>{p.pos} · {p.team} · {fmtHeight(p.height)}</div>
-        </div>
-        <div style={{ marginLeft: 'auto' }}><Ovr v={p.ovr} big /></div>
-      </div>
-      <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
-        <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>Attributes</h2>
-        <p style={{ margin: '0 0 20px', color: C.mute, fontSize: 13 }}>Ratings not entered yet show “—”. Fill them in via public/players.csv.</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {Object.entries(GROUPS).map(([g, list]) => (
-            <section key={g} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase', letterSpacing: '.06em', color: C.accent }}>{g}</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: '12px 24px' }}>
-                {list.map(a => (
-                  <div key={a} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{a}</span><strong>{p.attrs[a] ?? '—'}</strong></div>
-                    <div style={{ height: 6, background: C.bg, borderRadius: 3 }}><div style={{ width: `${p.attrs[a] ?? 0}%`, height: '100%', borderRadius: 3, background: tier(p.attrs[a]) }} /></div>
-                  </div>
-                ))}
-              </div>
-            </section>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          {steps.map((_, i) => (
+            <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i <= step ? C.gold : C.border }} />
           ))}
         </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between' }}>
+          <button onClick={onDone} style={{ background: 'none', border: 'none', color: C.mute, fontSize: 13 }}>Skip</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {step > 0 && (
+              <button onClick={() => setStep(step - 1)} style={{
+                padding: '10px 16px', borderRadius: 10, border: `1px solid ${C.border}`, background: 'transparent', fontWeight: 600,
+              }}>Back</button>
+            )}
+            <button onClick={() => step === steps.length - 1 ? onDone() : setStep(step + 1)} style={{
+              padding: '10px 20px', borderRadius: 10, border: 'none', background: C.gold, color: '#111', fontWeight: 800,
+            }}>{step === steps.length - 1 ? "Let's play" : 'Next'}</button>
+          </div>
+        </div>
       </div>
     </div>
   )
 }
 
-function App() {
-  const h = useHash()
-  const [ready, setReady] = useState(false)
-  const [err, setErr] = useState('')
-  useEffect(() => { loadPlayers().then(p => { players = p; setReady(true) }).catch(e => setErr(String(e))) }, [])
-  const m = h.match(/^#\/players\/(.+)$/)
+function HowModal({ onClose }) {
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <style>{css}</style>
-      <Header />
-      <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>{err ? <p style={{ color: '#f87171' }}>Couldn't load players.csv: {err}</p> : !ready ? <p style={{ color: C.mute }}>Loading players…</p> : m ? <Detail slug={m[1]} /> : <Browse />}</main>
-      <Footer />
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(5,7,14,.75)', zIndex: 40,
+      display: 'grid', placeItems: 'center', padding: 20,
+    }}>
+      <div onClick={e => e.stopPropagation()} className="pop" style={{
+        width: '100%', maxWidth: 520, background: C.panel, border: `1px solid ${C.border}`,
+        borderRadius: 18, padding: 28, maxHeight: '85vh', overflow: 'auto',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontFamily: 'Archivo, sans-serif' }}>How to play</h2>
+          <button onClick={onClose} style={{ background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 8, width: 32, height: 32 }}>×</button>
+        </div>
+        <ol style={{ margin: 0, paddingLeft: 18, color: C.mute, lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <li><strong style={{ color: C.text }}>Beat, don’t match.</strong> Build a better line than today’s legendary season.</li>
+          <li><strong style={{ color: C.text }}>Five cards each round.</strong> Pick one player and assign them to one open stat.</li>
+          <li><strong style={{ color: C.text }}>Stats stay hidden</strong> until you lock (unless you use a power-up).</li>
+          <li><strong style={{ color: C.text }}>Higher is better</strong> on everything except turnovers (lower TOV wins).</li>
+          <li><strong style={{ color: C.text }}>Power-ups:</strong> Shuffle (new hand), Scout (full line), Sleuth (one stat for all), ±1 nudge before lock.</li>
+          <li><strong style={{ color: C.text }}>Final score</strong> = average of nine pick scores (0–100 each).</li>
+        </ol>
+      </div>
     </div>
   )
 }
 
-createRoot(document.getElementById('root')).render(<App />)
+function ProgressBar({ score, locks }) {
+  const pct = locks === 0 ? 0 : Math.min(100, score)
+  return (
+    <div style={{ height: 6, background: 'rgba(255,255,255,.12)', borderRadius: 99, overflow: 'hidden' }}>
+      <div style={{
+        width: `${pct}%`, height: '100%', borderRadius: 99,
+        background: `linear-gradient(90deg, ${C.goldDim}, ${C.gold}, ${C.green})`,
+        transition: 'width .4s ease',
+      }} />
+    </div>
+  )
+}
+
+function TargetBanner({ target, avg, locks, done }) {
+  return (
+    <div style={{
+      background: C.hero, border: `1px solid ${C.border}`, borderRadius: 18,
+      padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14,
+      boxShadow: '0 12px 40px rgba(45,27,105,.35)',
+    }}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Avatar name={target.name} size={64} glow />
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: C.gold, fontWeight: 700 }}>
+            Today’s legend — beat this line
+          </div>
+          <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 800, fontSize: 26, letterSpacing: '-.02em', marginTop: 2 }}>
+            {target.name}<span style={{ color: C.mute, fontWeight: 600, fontSize: 18 }}> · {target.pos}</span>
+          </div>
+          <div style={{ color: C.mute, fontSize: 14 }}>{target.team} · {target.season}</div>
+        </div>
+        <div style={{ textAlign: 'right', minWidth: 90 }}>
+          <div style={{ fontSize: 11, color: C.mute, textTransform: 'uppercase', letterSpacing: '.08em' }}>Score</div>
+          <div style={{ fontFamily: 'Archivo, sans-serif', fontWeight: 800, fontSize: 28, color: locks ? C.gold : C.mute }}>
+            {locks ? grade(avg) : '—'}
+          </div>
+          <div style={{ fontSize: 14, color: C.mute, fontVariantNumeric: 'tabular-nums' }}>
+            {locks ? `${Math.round(avg)}/100` : '—/100'}
+          </div>
+        </div>
+      </div>
+      <ProgressBar score={avg} locks={locks} />
+      {done && (
+        <div style={{
+          fontSize: 13, fontWeight: 600,
+          color: avg >= 85 ? C.green : avg >= 70 ? C.gold : C.red,
+        }}>
+          {avg >= 90 ? 'You crushed the legend.' : avg >= 80 ? 'Solid — the legend felt that.' : avg >= 70 ? 'Close, but the legend still leads.' : 'The legend wins today. Run it back tomorrow.'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StatGrid({ target, locks, selected, onSelect, scouted }) {
+  const groups = ['Offense', 'Defense']
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontFamily: 'Archivo, sans-serif' }}>Pick a stat</h2>
+        <span style={{ color: C.mute, fontSize: 13, fontWeight: 600 }}>{Object.keys(locks).length}/9</span>
+      </div>
+      {groups.map(g => (
+        <div key={g}>
+          <div style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: C.green, fontWeight: 700, marginBottom: 8 }}>{g}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            {STATS.filter(s => s.group === g).map(s => {
+              const lock = locks[s.key]
+              const on = selected === s.key
+              const beat = lock && didBeat(s.key, lock.value, target.stats[s.key])
+              return (
+                <button
+                  key={s.key}
+                  className={`stat-btn${on ? ' on' : ''}${lock ? ' locked' : ''}`}
+                  disabled={!!lock}
+                  onClick={() => onSelect(s.key)}
+                  style={{
+                    padding: '14px 10px', borderRadius: 12, textAlign: 'center',
+                    border: `1px solid ${lock ? (beat ? C.green + '66' : C.red + '55') : C.border}`,
+                    background: lock ? (beat ? 'rgba(52,211,153,.08)' : 'rgba(248,113,113,.06)') : C.panel2,
+                    minHeight: 78,
+                  }}
+                >
+                  {lock ? (
+                    <>
+                      <div style={{ fontWeight: 800, fontSize: 18, color: beat ? C.green : C.red }}>
+                        {s.fmt(lock.value)}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>{s.label}</div>
+                      <div style={{ fontSize: 10, color: C.mute, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {lock.player.name.split(' ').slice(-1)[0]} · {lock.score}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontWeight: 800, fontSize: 20 }}>{s.fmt(target.stats[s.key])}</div>
+                      <div style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>{s.label}</div>
+                      {s.lowerBetter && <div style={{ fontSize: 10, color: C.purple, marginTop: 2 }}>lower wins</div>}
+                    </>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PlayerList({ hand, selected, onSelect, scoutedId, sleuthStat, nudge, target }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {hand.map(p => {
+        const on = selected?.id === p.id
+        const showAll = scoutedId === p.id
+        const showOne = sleuthStat && p.stats[sleuthStat] != null
+        return (
+          <button
+            key={p.id}
+            className={`player-btn${on ? ' on' : ''}`}
+            onClick={() => onSelect(p)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+              borderRadius: 12, border: `1px solid ${C.border}`, background: C.panel2, textAlign: 'left', width: '100%',
+            }}
+          >
+            <Avatar name={p.name} size={40} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {p.name}{' '}
+                <span style={{ color: C.mute, fontWeight: 500, fontSize: 12 }}>{p.pos}</span>
+              </div>
+              <div style={{ fontSize: 12, color: C.mute }}>{p.team} · {p.season}</div>
+              {(showAll || showOne) && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                  {(showAll ? STATS : STATS.filter(s => s.key === sleuthStat)).map(s => {
+                    const v = p.stats[s.key]
+                    const beat = didBeat(s.key, v, target.stats[s.key])
+                    return (
+                      <span key={s.key} style={{
+                        fontSize: 11, padding: '2px 6px', borderRadius: 6, fontWeight: 600,
+                        background: beat ? 'rgba(52,211,153,.15)' : 'rgba(248,113,113,.12)',
+                        color: beat ? C.green : C.red,
+                      }}>{s.label} {s.fmt(v)}</span>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+            {on && nudge !== 0 && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.purple }}>
+                {nudge > 0 ? '+1' : '−1'} ready
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function PowerBar({ powers, onUse, disabled }) {
+  const items = [
+    { key: 'shuffle', label: `Shuffle · ${powers.shuffle}`, tip: 'New hand of 5' },
+    { key: 'scout', label: `Scout · ${powers.scout}`, tip: 'Reveal full line' },
+    { key: 'sleuth', label: `Sleuth · ${powers.sleuth}`, tip: 'Reveal one stat for all' },
+    { key: 'plus', label: '+1', tip: 'Nudge up before lock' },
+    { key: 'minus', label: '−1', tip: 'Nudge down before lock' },
+  ]
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', color: C.purple, fontWeight: 700 }}>Power-ups</span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {items.map(it => (
+          <button
+            key={it.key}
+            className="power"
+            title={it.tip}
+            disabled={disabled || powers[it.key] <= 0}
+            onClick={() => onUse(it.key)}
+            style={{
+              padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}`,
+              background: C.panel, fontSize: 12, fontWeight: 700, minWidth: 64,
+            }}
+          >{it.label}</button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Results({ target, locks, avg, onReplayNote }) {
+  const beaten = STATS.filter(s => locks[s.key] && didBeat(s.key, locks[s.key].value, target.stats[s.key])).length
+  return (
+    <div className="pop" style={{
+      background: C.panel, border: `1px solid ${C.border}`, borderRadius: 18, padding: 24,
+      display: 'flex', flexDirection: 'column', gap: 18,
+    }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 12, color: C.mute, letterSpacing: '.1em', textTransform: 'uppercase' }}>Final score</div>
+        <div style={{ fontFamily: 'Archivo, sans-serif', fontSize: 56, fontWeight: 800, color: C.gold, lineHeight: 1.1 }}>
+          {grade(avg)}
+        </div>
+        <div style={{ fontSize: 20, color: C.text, fontWeight: 600 }}>{Math.round(avg)} / 100</div>
+        <div style={{ color: C.mute, marginTop: 8, fontSize: 14 }}>
+          Beat {beaten}/9 stats vs {target.name} · {target.season}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {STATS.map((s, i) => {
+          const lock = locks[s.key]
+          const beat = didBeat(s.key, lock.value, target.stats[s.key])
+          return (
+            <div key={s.key} style={{
+              display: 'grid', gridTemplateColumns: '28px 48px 1fr auto', gap: 10, alignItems: 'center',
+              padding: '10px 12px', borderRadius: 10, background: C.panel2, border: `1px solid ${C.border}`,
+            }}>
+              <span style={{ color: C.mute, fontSize: 12, fontWeight: 700 }}>{String(i + 1).padStart(2, '0')}</span>
+              <span style={{ fontWeight: 800, fontSize: 13 }}>{s.label}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {lock.player.name}
+                </div>
+                <div style={{ fontSize: 12, color: C.mute }}>
+                  {s.fmt(lock.value)}
+                  <span style={{ color: beat ? C.green : C.red }}> vs {s.fmt(target.stats[s.key])}</span>
+                  {beat ? ' · beat' : ' · missed'}
+                </div>
+              </div>
+              <span style={{
+                fontWeight: 800, fontSize: 14, color: lock.score >= 88 ? C.green : lock.score >= 72 ? C.gold : C.red,
+              }}>{grade(lock.score)}/{lock.score}</span>
+            </div>
+          )
+        })}
+      </div>
+      <p style={{ margin: 0, textAlign: 'center', color: C.mute, fontSize: 13 }}>{onReplayNote}</p>
+    </div>
+  )
+}
+
+function applyNudge(statKey, value, nudge) {
+  if (!nudge) return value
+  const meta = STATS.find(s => s.key === statKey)
+  if (statKey.includes('%')) return Math.max(0, Math.min(100, value + nudge))
+  if (['SPG', 'BPG', '3PM', 'TOV'].includes(statKey)) return Math.max(0, Math.round((value + nudge * 0.1) * 10) / 10)
+  return Math.max(0, Math.round((value + nudge * 0.5) * 10) / 10)
+}
+
+function Game() {
+  const dateKey = todayKey()
+  const target = useMemo(() => dailyTarget(dateKey), [dateKey])
+
+  const [showOnboard, setShowOnboard] = useState(() => {
+    try { return localStorage.getItem(ONBOARD) !== '1' } catch { return true }
+  })
+  const [showHow, setShowHow] = useState(false)
+
+  const init = () => {
+    const saved = loadSave(dateKey)
+    if (saved) return saved
+    return {
+      dateKey,
+      locks: {},
+      usedIds: [],
+      powers: { shuffle: 2, scout: 1, sleuth: 1, plus: 1, minus: 1 },
+      round: 0,
+      handSeed: 0,
+      done: false,
+    }
+  }
+
+  const [state, setState] = useState(init)
+  const [selPlayer, setSelPlayer] = useState(null)
+  const [selStat, setSelStat] = useState(null)
+  const [scoutedId, setScoutedId] = useState(null)
+  const [sleuthStat, setSleuthStat] = useState(null)
+  const [nudge, setNudge] = useState(0)
+  const [sleuthPickMode, setSleuthPickMode] = useState(false)
+  const [toast, setToast] = useState('')
+
+  const usedSet = useMemo(() => new Set(state.usedIds), [state.usedIds])
+  const hand = useMemo(
+    () => pickHand(dateKey, state.round + state.handSeed * 17, usedSet),
+    [dateKey, state.round, state.handSeed, usedSet],
+  )
+
+  const lockList = Object.values(state.locks)
+  const avg = lockList.length ? lockList.reduce((a, l) => a + l.score, 0) / lockList.length : 0
+  const done = state.done || Object.keys(state.locks).length >= 9
+
+  useEffect(() => {
+    saveGame({ ...state, done })
+  }, [state, done])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2200)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const finishOnboard = () => {
+    try { localStorage.setItem(ONBOARD, '1') } catch {}
+    setShowOnboard(false)
+  }
+
+  const flash = msg => setToast(msg)
+
+  const onPower = key => {
+    if (done) return
+    if (key === 'shuffle' && state.powers.shuffle > 0) {
+      setState(s => ({ ...s, powers: { ...s.powers, shuffle: s.powers.shuffle - 1 }, handSeed: s.handSeed + 1 }))
+      setSelPlayer(null)
+      setScoutedId(null)
+      setSleuthStat(null)
+      setNudge(0)
+      flash('Hand shuffled')
+    } else if (key === 'scout' && state.powers.scout > 0) {
+      if (!selPlayer) { flash('Select a player to scout'); return }
+      setScoutedId(selPlayer.id)
+      setState(s => ({ ...s, powers: { ...s.powers, scout: 0 } }))
+      flash(`Scouted ${selPlayer.name}`)
+    } else if (key === 'sleuth' && state.powers.sleuth > 0) {
+      setSleuthPickMode(true)
+      flash('Pick a stat to reveal for all players')
+    } else if (key === 'plus' && state.powers.plus > 0) {
+      if (!selPlayer || !selStat) { flash('Pick player + stat first'); return }
+      setNudge(1)
+      setState(s => ({ ...s, powers: { ...s.powers, plus: 0 } }))
+      flash('+1 nudge armed')
+    } else if (key === 'minus' && state.powers.minus > 0) {
+      if (!selPlayer || !selStat) { flash('Pick player + stat first'); return }
+      setNudge(-1)
+      setState(s => ({ ...s, powers: { ...s.powers, minus: 0 } }))
+      flash('−1 nudge armed')
+    }
+  }
+
+  const onSelectStat = key => {
+    if (state.locks[key]) return
+    if (sleuthPickMode && state.powers.sleuth > 0) {
+      setSleuthStat(key)
+      setSleuthPickMode(false)
+      setState(s => ({ ...s, powers: { ...s.powers, sleuth: 0 } }))
+      flash(`Sleuth: ${key} revealed`)
+      return
+    }
+    setSelStat(key)
+  }
+
+  const canLock = selPlayer && selStat && !state.locks[selStat] && !done
+
+  const lockIn = () => {
+    if (!canLock) return
+    const raw = selPlayer.stats[selStat]
+    const value = applyNudge(selStat, raw, nudge)
+    const score = scoreBeat(selStat, value, target.stats[selStat])
+    const beat = didBeat(selStat, value, target.stats[selStat])
+    const nextLocks = {
+      ...state.locks,
+      [selStat]: { player: selPlayer, value, raw, score, nudge },
+    }
+    const nextUsed = [...state.usedIds, selPlayer.id]
+    const finished = Object.keys(nextLocks).length >= 9
+    setState(s => ({
+      ...s,
+      locks: nextLocks,
+      usedIds: nextUsed,
+      round: s.round + 1,
+      handSeed: 0,
+      done: finished,
+    }))
+    setSelPlayer(null)
+    setSelStat(null)
+    setScoutedId(null)
+    setSleuthStat(null)
+    setNudge(0)
+    flash(beat ? `Locked — you beat ${selStat}!` : `Locked — short on ${selStat}`)
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }}>
+      <style>{css}</style>
+      <Header onHow={() => setShowHow(true)} dateKey={dateKey} />
+
+      <main style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 20px 80px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div>
+          <h1 style={{ margin: '0 0 6px', fontFamily: 'Archivo, sans-serif', fontSize: 28, letterSpacing: '-.03em' }}>
+            Beat the Legend
+          </h1>
+          <p style={{ margin: 0, color: C.mute, fontSize: 15 }}>
+            Draft seasons that out-stat today’s perfect player. Higher wins — except turnovers.
+          </p>
+        </div>
+
+        <TargetBanner target={target} avg={avg} locks={lockList.length} done={done} />
+
+        {done ? (
+          <Results
+            target={target}
+            locks={state.locks}
+            avg={avg}
+            onReplayNote="Come back tomorrow for a new legend. Your score is saved for today."
+          />
+        ) : (
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20, alignItems: 'start',
+          }} className="game-grid">
+            <style>{`@media (max-width: 860px) { .game-grid { grid-template-columns: 1fr !important } }`}</style>
+
+            <div style={{
+              background: C.panel, border: `1px solid ${C.border}`, borderRadius: 18, padding: 20,
+            }}>
+              <StatGrid
+                target={target}
+                locks={state.locks}
+                selected={selStat}
+                onSelect={onSelectStat}
+                scouted={scoutedId}
+              />
+            </div>
+
+            <aside style={{
+              background: C.panel, border: `1px solid ${C.border}`, borderRadius: 18, padding: 18,
+              display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 72,
+            }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontFamily: 'Archivo, sans-serif' }}>Pick a player</h2>
+              <PowerBar powers={state.powers} onUse={onPower} disabled={done} />
+              {sleuthPickMode && (
+                <div className="pulse" style={{
+                  padding: '10px 12px', borderRadius: 10, background: 'rgba(167,139,250,.12)',
+                  border: `1px solid ${C.purple}55`, fontSize: 13, color: C.purple, fontWeight: 600,
+                }}>Tap a stat above to sleuth it for this hand</div>
+              )}
+              <PlayerList
+                hand={hand}
+                selected={selPlayer}
+                onSelect={setSelPlayer}
+                scoutedId={scoutedId}
+                sleuthStat={sleuthStat}
+                nudge={nudge}
+                target={target}
+              />
+            </aside>
+          </div>
+        )}
+      </main>
+
+      {!done && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 30,
+          background: 'rgba(10,12,20,.92)', backdropFilter: 'blur(12px)',
+          borderTop: `1px solid ${C.border}`, padding: '14px 20px',
+        }}>
+          <div style={{
+            maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+          }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 12, color: C.mute, fontWeight: 600 }}>
+                {!selPlayer && !selStat && 'Pick a player · Pick a stat'}
+                {selPlayer && !selStat && `Player: ${selPlayer.name} · pick a stat`}
+                {!selPlayer && selStat && `Stat: ${selStat} · pick a player`}
+                {selPlayer && selStat && (
+                  <>Ready: <span style={{ color: C.text }}>{selPlayer.name}</span> → <span style={{ color: C.gold }}>{selStat}</span>
+                    {nudge !== 0 && <span style={{ color: C.purple }}> ({nudge > 0 ? '+1' : '−1'})</span>}
+                  </>
+                )}
+              </div>
+              <div style={{ fontSize: 13, color: C.mute, marginTop: 2 }}>
+                {canLock
+                  ? 'Lock to reveal their number and score the beat'
+                  : 'Select one player and one open stat'}
+              </div>
+            </div>
+            <button
+              className="lock-btn"
+              disabled={!canLock}
+              onClick={lockIn}
+              style={{
+                padding: '14px 28px', borderRadius: 12, border: 'none',
+                background: canLock ? `linear-gradient(135deg, ${C.gold}, #f97316)` : C.panel2,
+                color: canLock ? '#111' : C.mute, fontWeight: 800, fontSize: 15,
+                minWidth: 140,
+              }}
+            >Lock in</button>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="pop" style={{
+          position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 60,
+          background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 10,
+          padding: '10px 16px', fontSize: 13, fontWeight: 600, boxShadow: '0 8px 32px rgba(0,0,0,.4)',
+        }}>{toast}</div>
+      )}
+
+      {showOnboard && <Onboarding target={target} onDone={finishOnboard} />}
+      {showHow && <HowModal onClose={() => setShowHow(false)} />}
+    </div>
+  )
+}
+
+createRoot(document.getElementById('root')).render(<Game />)
