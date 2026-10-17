@@ -1,15 +1,15 @@
 {
-  "name": "nba-2k24-database",
+  "name": "guess-the-numbers-nba",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173 --strictPort",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "fetch-stats": "node scripts/fetch-bbr-stats.mjs"
   },
   "dependencies": {
-    "papaparse": "^5.7.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

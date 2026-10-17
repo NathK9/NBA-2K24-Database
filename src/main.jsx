@@ -1,308 +1,630 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { loadPlayers, ATTRS, GROUPS, fmtHeight, posList } from './players.js'
+import {
+  STAT_DEFS,
+  availableStats,
+  emptyGuesses,
+  formatSeasonDisplay,
+  formatStat,
+  loadSeasons,
+  parseImportCsv,
+  scoreRound,
+  shuffle,
+} from './data.js'
 
-let players = []
-
-const C = { bg: '#0b0d12', panel: '#141821', border: '#232836', text: '#e8eaf0', mute: '#8b93a7', accent: '#f5a524' }
-const PER_PAGE = 48
-const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C']
-const ROSTERS = ['NBA 2023-24 Season', 'Offseason NBA (September 2023)', 'WNBA (September 2023)']
-const SORTS = [['roster', 'Roster order'], ['ovr-d', 'OVR ↓'], ['ovr-a', 'OVR ↑'], ['name', 'Name'], ['h-d', 'Height ↓'], ['h-a', 'Height ↑'], ...ATTRS.map(a => ['attr:' + a, a])]
-
-const tier = o => o == null ? '#3a4152' : o >= 90 ? '#c084fc' : o >= 85 ? '#38bdf8' : o >= 80 ? '#f5a524' : o >= 75 ? '#94a3b8' : '#a16207'
-const initials = n => n.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-
-const css = `
-  * { box-sizing: border-box }
-  a { color: inherit; text-decoration: none }
-  .card { transition: border-color .15s, background .15s }
-  .card:hover { border-color: ${C.accent} !important; background: #1a1f2b !important }
-  .chip:hover, .pg:hover { border-color: ${C.accent} !important }
-  .row:hover td { background: #1a1f2b }
-  .layout { display: grid; grid-template-columns: 260px 1fr; gap: 24px }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr } }
-  input, select, button { font: inherit; color: inherit }
-`
-const field = { width: '100%', padding: '8px 10px', background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text }
-const label = { fontSize: 12, textTransform: 'uppercase', letterSpacing: '.06em', color: C.mute, fontWeight: 600 }
-
-function useHash() {
-  const [h, setH] = useState(location.hash)
-  useEffect(() => { const f = () => { setH(location.hash); scrollTo(0, 0) }; addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
-  return h
+const C = {
+  bg: '#070b14',
+  bg2: '#0c1220',
+  panel: '#121a2b',
+  panel2: '#182238',
+  border: '#243049',
+  borderHot: '#3d5a8a',
+  text: '#eef2ff',
+  mute: '#8b9bb8',
+  accent: '#f97316',
+  accent2: '#fb923c',
+  good: '#34d399',
+  goodBg: 'rgba(52,211,153,.12)',
+  warn: '#fbbf24',
+  bad: '#f87171',
+  badBg: 'rgba(248,113,113,.12)',
+  blue: '#60a5fa',
+  court: '#1a2740',
 }
 
-function Header() {
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box }
+  html, body, #root { min-height: 100% }
+  body { margin: 0; background: ${C.bg}; color: ${C.text}; font-family: 'IBM Plex Sans', system-ui, sans-serif }
+  button, input { font: inherit; color: inherit }
+  button { cursor: pointer }
+  button:disabled { cursor: not-allowed; opacity: .45 }
+  a { color: ${C.blue} }
+  .stat-input:focus { outline: none; border-color: ${C.accent} !important; box-shadow: 0 0 0 3px rgba(249,115,22,.25) }
+  .stat-input::-webkit-outer-spin-button, .stat-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0 }
+  .stat-input { -moz-appearance: textfield }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px) }
+  .btn-ghost:hover:not(:disabled) { border-color: ${C.accent}; color: ${C.text} }
+  .card-lift { transition: border-color .15s, transform .15s }
+  .card-lift:hover { border-color: ${C.borderHot} }
+  .pulse { animation: pulse 1.6s ease-in-out infinite }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
+  .fade-in { animation: fadeIn .35s ease }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+  .court-bg {
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(249,115,22,.18), transparent 55%),
+      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(96,165,250,.08), transparent 50%),
+      linear-gradient(180deg, ${C.bg2} 0%, ${C.bg} 40%, #05080f 100%);
+  }
+  .grid-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  @media (min-width: 720px) {
+    .grid-stats { grid-template-columns: repeat(4, 1fr); gap: 14px }
+  }
+  @media (max-width: 560px) {
+    .hero-title { font-size: 28px !important }
+    .player-name { font-size: 28px !important }
+  }
+`
+
+function Badge({ children, color = C.accent, bg }) {
   return (
-    <header style={{ background: '#07090d', borderBottom: `1px solid ${C.border}` }}>
-      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 24 }}>
-        <a href="#" style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 18 }}>
-          <span style={{ width: 28, height: 28, borderRadius: 6, background: C.accent, color: '#111', display: 'grid', placeItems: 'center' }}>2K</span>
-          Hoops<span style={{ color: C.accent }}>DB</span>
-        </a>
-        <nav style={{ display: 'flex', gap: 4 }}>
-          {['MyTEAM', 'MyNBA'].map(t => (
-            <a key={t} href="#" style={{ padding: '6px 12px', borderRadius: 6, fontWeight: 600, fontSize: 14, background: t === 'MyNBA' ? C.panel : 'transparent', color: t === 'MyNBA' ? C.text : C.mute }}>{t}</a>
-          ))}
-        </nav>
-        <nav style={{ display: 'flex', gap: 16, fontSize: 14, color: C.mute, marginLeft: 8 }}>
-          {['Home', 'Players', 'Teams', 'Rosters', 'Compare', 'Lineup Builder', 'Tier List'].map(t => (
-            <a key={t} href="#" style={{ color: t === 'Players' ? C.text : C.mute }}>{t}</a>
-          ))}
-        </nav>
-        <button style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', cursor: 'pointer' }}>Sign in</button>
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700,
+      letterSpacing: '.04em', textTransform: 'uppercase',
+      color, background: bg || `${color}22`, border: `1px solid ${color}55`,
+    }}>{children}</span>
+  )
+}
+
+function Btn({ children, onClick, variant = 'primary', disabled, style, type = 'button' }) {
+  const base = {
+    primary: {
+      background: `linear-gradient(180deg, ${C.accent2}, ${C.accent})`,
+      color: '#111', border: 'none', fontWeight: 700,
+      boxShadow: '0 8px 24px rgba(249,115,22,.25)',
+    },
+    ghost: {
+      background: 'transparent', color: C.mute,
+      border: `1px solid ${C.border}`, fontWeight: 600,
+    },
+    dark: {
+      background: C.panel2, color: C.text,
+      border: `1px solid ${C.border}`, fontWeight: 600,
+    },
+  }[variant]
+  const cls = variant === 'primary' ? 'btn-primary' : 'btn-ghost'
+  return (
+    <button type={type} className={cls} disabled={disabled} onClick={onClick} style={{
+      padding: '12px 20px', borderRadius: 10, transition: 'all .15s',
+      ...base, ...style,
+    }}>{children}</button>
+  )
+}
+
+function Header({ onHome, mode }) {
+  return (
+    <header style={{
+      borderBottom: `1px solid ${C.border}`,
+      background: 'rgba(7,11,20,.85)',
+      backdropFilter: 'blur(10px)',
+      position: 'sticky', top: 0, zIndex: 20,
+    }}>
+      <div style={{
+        maxWidth: 960, margin: '0 auto', padding: '14px 20px',
+        display: 'flex', alignItems: 'center', gap: 14,
+      }}>
+        <button onClick={onHome} style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+        }}>
+          <span style={{
+            width: 36, height: 36, borderRadius: 10,
+            background: `linear-gradient(145deg, ${C.accent2}, #c2410c)`,
+            display: 'grid', placeItems: 'center',
+            fontWeight: 900, color: '#111', fontSize: 14,
+            boxShadow: '0 4px 14px rgba(249,115,22,.35)',
+          }}>GTN</span>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 15, letterSpacing: '.02em', lineHeight: 1.1 }}>
+              GUESS THE NUMBERS
+            </div>
+            <div style={{ fontSize: 11, color: C.mute, fontWeight: 600, letterSpacing: '.08em' }}>NBA EDITION</div>
+          </div>
+        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          {mode && <Badge color={C.blue}>{mode}</Badge>}
+        </div>
       </div>
     </header>
   )
 }
 
 function Footer() {
-  const cols = { MyNBA: ['Home', 'Players', 'Teams', 'Rosters'], Tools: ['Compare', 'Lineup Builder', 'Tier List'], Site: ['About', 'Contact', 'Site Updates', 'Privacy Policy', 'Terms of Service'] }
   return (
-    <footer style={{ borderTop: `1px solid ${C.border}`, marginTop: 48, background: '#07090d' }}>
-      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '32px 24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 24 }}>
-        {Object.entries(cols).map(([h, ls]) => (
-          <div key={h} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 14 }}>{h}</h3>
-            {ls.map(l => <a key={l} href="#" style={{ color: C.mute, fontSize: 14 }}>{l}</a>)}
-          </div>
-        ))}
+    <footer style={{ borderTop: `1px solid ${C.border}`, marginTop: 'auto', padding: '28px 20px' }}>
+      <div style={{ maxWidth: 960, margin: '0 auto', color: C.mute, fontSize: 13, lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 8px' }}>
+          Stats sourced from{' '}
+          <a href="https://www.basketball-reference.com/" target="_blank" rel="noreferrer">
+            Basketball Reference
+          </a>
+          . Regular-season per-game averages. Percentages shown as e.g. 46.7%. Missing stats are never treated as zero.
+        </p>
+        <p style={{ margin: 0, fontSize: 12 }}>
+          Not affiliated with the NBA or Basketball Reference. For educational trivia use only.
+        </p>
       </div>
-      <p style={{ textAlign: 'center', color: C.mute, fontSize: 12, padding: '0 0 24px', margin: 0 }}>HoopsDB — NBA 2K24 MyNBA player ratings</p>
     </footer>
   )
 }
 
-function Avatar({ p, size, fill }) {
-  const [bad, setBad] = useState(false)
-  if (p.img && !bad) return <img src={p.img} alt={p.name} onError={() => setBad(true)} style={{ width: fill ? '100%' : size, height: size, objectFit: 'cover', borderRadius: 8, background: '#1a1f2b' }} />
+function Home({ count, onStart, onImport }) {
   return (
-    <div style={{ width: fill ? '100%' : size, height: size, borderRadius: 8, background: `linear-gradient(160deg, #222838, #151922)`, display: 'grid', placeItems: 'center', fontSize: size / 3, fontWeight: 800, color: '#5b6478' }}>
-      {initials(p.name)}
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 28, padding: '32px 0 48px' }}>
+      <section style={{
+        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 20,
+        padding: '36px 28px', position: 'relative', overflow: 'hidden',
+      }}>
+        <div style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: 'radial-gradient(circle at 85% 20%, rgba(249,115,22,.15), transparent 45%)',
+        }} />
+        <Badge color={C.accent}>Basketball trivia</Badge>
+        <h1 className="hero-title" style={{
+          fontFamily: "'Archivo Black', sans-serif",
+          fontSize: 42, margin: '16px 0 12px', lineHeight: 1.05,
+          letterSpacing: '-.02em', maxWidth: 560,
+        }}>
+          Guess the player&apos;s stats
+        </h1>
+        <p style={{ margin: '0 0 24px', color: C.mute, fontSize: 17, maxWidth: 520, lineHeight: 1.55 }}>
+          We reveal the <strong style={{ color: C.text }}>player</strong>, <strong style={{ color: C.text }}>season</strong>, and{' '}
+          <strong style={{ color: C.text }}>team</strong>. You fill in the numbers. How well do you know NBA history?
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+          <Btn onClick={() => onStart('classic')}>Play classic · 5 rounds</Btn>
+          <Btn variant="dark" onClick={() => onStart('endless')}>Endless mode</Btn>
+          <Btn variant="ghost" onClick={onImport}>Import stats CSV</Btn>
+        </div>
+        <p style={{ margin: '18px 0 0', color: C.mute, fontSize: 13 }}>
+          {count} verified player-seasons loaded from Basketball Reference
+        </p>
+      </section>
+
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14 }}>
+        {[
+          { t: 'Player always shown', d: 'Never guess who it is — only their numbers for that season.' },
+          { t: 'Real BBR stats', d: 'Every answer links back to the Basketball Reference player page.' },
+          { t: 'Eight categories', d: 'PPG, RPG, APG, SPG, BPG, FG%, 3P%, and FT%.' },
+          { t: 'Partial credit', d: 'Close guesses still score. Exact matches earn full points.' },
+        ].map(x => (
+          <div key={x.t} className="card-lift" style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 15 }}>{x.t}</div>
+            <div style={{ color: C.mute, fontSize: 13, lineHeight: 1.5 }}>{x.d}</div>
+          </div>
+        ))}
+      </section>
+
+      <section style={{
+        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 16, padding: 22,
+      }}>
+        <h2 style={{ margin: '0 0 8px', fontSize: 16 }}>Example prompt</h2>
+        <div style={{
+          background: C.bg, border: `1px dashed ${C.border}`, borderRadius: 12,
+          padding: 18, fontFamily: 'ui-monospace, monospace', fontSize: 14, lineHeight: 1.7,
+        }}>
+          <div style={{ color: C.accent, fontWeight: 700, letterSpacing: '.06em', fontSize: 12 }}>GUESS THE PLAYER&apos;S STATS</div>
+          <div>Player: <span style={{ color: C.text, fontWeight: 600 }}>Kobe Bryant</span></div>
+          <div>Season: <span style={{ color: C.text, fontWeight: 600 }}>2008–09</span></div>
+          <div>Team: <span style={{ color: C.text, fontWeight: 600 }}>Los Angeles Lakers</span></div>
+        </div>
+      </section>
     </div>
   )
 }
 
-function Ovr({ v, big }) {
-  return <span style={{ background: tier(v), color: '#0b0d12', fontWeight: 800, borderRadius: 6, padding: big ? '6px 12px' : '2px 8px', fontSize: big ? 28 : 15 }}>{v ?? '—'}</span>
+function ImportPanel({ onClose, onImported }) {
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const fileRef = useRef(null)
+
+  const handleFile = async (file) => {
+    setErr(''); setMsg('')
+    try {
+      const text = await file.text()
+      const { records, skipped } = parseImportCsv(text)
+      if (!records.length) throw new Error('No valid rows. Each row needs player, season, ppg/rpg/apg, and a basketball-reference.com source_url.')
+      onImported(records)
+      setMsg(`Imported ${records.length} season${records.length === 1 ? '' : 's'}${skipped.length ? ` · skipped ${skipped.length}` : ''}.`)
+    } catch (e) {
+      setErr(String(e.message || e))
+    }
+  }
+
+  return (
+    <div className="fade-in" style={{
+      background: C.panel, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, margin: '28px 0',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start' }}>
+        <div>
+          <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Import Basketball Reference stats</h2>
+          <p style={{ margin: 0, color: C.mute, fontSize: 14, lineHeight: 1.5, maxWidth: 560 }}>
+            When live fetch isn&apos;t available, add seasons via CSV. Required columns:
+            <code style={{ color: C.accent }}> player, season, team, ppg, rpg, apg, spg, bpg, fg%, 3p%, ft%, source_url</code>.
+            Only rows with a Basketball Reference URL are accepted. Missing stats leave the cell blank (not 0).
+          </p>
+        </div>
+        <Btn variant="ghost" onClick={onClose} style={{ padding: '8px 12px' }}>Close</Btn>
+      </div>
+      <div style={{ marginTop: 18, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+        <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+        <Btn onClick={() => fileRef.current?.click()}>Choose CSV file</Btn>
+        <a href="/data/import-template.csv" download="guess-the-numbers-template.csv" style={{ fontSize: 14 }}>
+          Download template
+        </a>
+      </div>
+      {msg && <p style={{ color: C.good, margin: '14px 0 0', fontSize: 14 }}>{msg}</p>}
+      {err && <p style={{ color: C.bad, margin: '14px 0 0', fontSize: 14 }}>{err}</p>}
+    </div>
+  )
 }
 
-function Filters({ f, set, teams, reset }) {
+function tierColor(tier) {
+  return { exact: C.good, close: C.good, near: C.warn, far: C.accent, miss: C.bad, na: C.mute }[tier] || C.mute
+}
+
+function tierLabel(tier) {
+  return { exact: 'Exact', close: 'Close', near: 'Near', far: 'Far', miss: 'Miss', na: 'N/A' }[tier] || ''
+}
+
+function GameRound({ record, round, total, score, streak, onSubmit, onNext, revealed }) {
+  const [guesses, setGuesses] = useState(emptyGuesses)
+  const [result, setResult] = useState(null)
+  const stats = useMemo(() => availableStats(record), [record])
+
+  useEffect(() => {
+    setGuesses(emptyGuesses())
+    setResult(null)
+  }, [record.id])
+
+  const set = (key, v) => setGuesses(g => ({ ...g, [key]: v }))
+
+  const submit = (e) => {
+    e?.preventDefault()
+    if (result) return
+    const r = scoreRound(guesses, record)
+    setResult(r)
+    onSubmit(r)
+  }
+
+  const filled = stats.filter(d => String(guesses[d.key]).trim() !== '').length
+
   return (
-    <aside style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 18, alignSelf: 'start' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ margin: 0, fontSize: 16 }}>Filters</h2>
-        <button onClick={reset} style={{ background: 'none', border: 'none', color: C.accent, cursor: 'pointer', fontSize: 13 }}>Reset</button>
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '24px 0 40px' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Badge color={C.blue}>Round {round}{total ? ` / ${total}` : ''}</Badge>
+          <Badge color={C.accent}>Score {score}</Badge>
+          {streak > 1 && <Badge color={C.good}>Streak ×{streak}</Badge>}
+        </div>
+        <div style={{ color: C.mute, fontSize: 13 }}>{filled}/{stats.length} filled</div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Roster</span>
-        {ROSTERS.map((r, i) => (
-          <label key={r} style={{ display: 'flex', gap: 8, fontSize: 14, color: i ? C.mute : C.text }}>
-            <input type="radio" checked={i === 0} disabled={i > 0} readOnly /> {r} <span style={{ color: C.mute }}>({i ? 0 : players.length})</span>
-          </label>
-        ))}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Team</span>
-        <select value={f.team} onChange={e => set({ team: e.target.value })} style={field}>
-          <option value="">All teams</option>
-          {teams.map(([t, n]) => <option key={t} value={t}>{t} ({n})</option>)}
-        </select>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Position</span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {POSITIONS.map(p => {
-            const on = f.pos.includes(p)
-            return <button key={p} className="chip" onClick={() => set({ pos: on ? f.pos.filter(x => x !== p) : [...f.pos, p] })}
-              style={{ flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, border: `1px solid ${on ? C.accent : C.border}`, background: on ? C.accent : C.bg, color: on ? '#111' : C.text }}>{p}</button>
+
+      <section style={{
+        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 18, padding: '24px 22px',
+        position: 'relative', overflow: 'hidden',
+      }}>
+        <div style={{
+          position: 'absolute', right: -20, top: -20, width: 140, height: 140, borderRadius: '50%',
+          border: `3px solid ${C.border}`, opacity: .35,
+        }} />
+        <div style={{ color: C.accent, fontWeight: 800, letterSpacing: '.12em', fontSize: 12, marginBottom: 10 }}>
+          GUESS THE PLAYER&apos;S STATS
+        </div>
+        <h2 className="player-name" style={{
+          margin: '0 0 14px', fontFamily: "'Archivo Black', sans-serif",
+          fontSize: 36, letterSpacing: '-.02em', lineHeight: 1.1,
+        }}>{record.player}</h2>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{
+            background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
+            padding: '10px 14px', minWidth: 120,
+          }}>
+            <div style={{ fontSize: 11, color: C.mute, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Season</div>
+            <div style={{ fontWeight: 700, fontSize: 18 }}>{formatSeasonDisplay(record.season)}</div>
+          </div>
+          <div style={{
+            background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
+            padding: '10px 14px', flex: 1, minWidth: 160,
+          }}>
+            <div style={{ fontSize: 11, color: C.mute, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Team</div>
+            <div style={{ fontWeight: 700, fontSize: 18 }}>{record.team}</div>
+          </div>
+          {record.position && (
+            <div style={{
+              background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '10px 14px',
+            }}>
+              <div style={{ fontSize: 11, color: C.mute, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Pos</div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{record.position}</div>
+            </div>
+          )}
+          {record.games != null && (
+            <div style={{
+              background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
+              padding: '10px 14px',
+            }}>
+              <div style={{ fontSize: 11, color: C.mute, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Games</div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{record.games}</div>
+            </div>
+          )}
+        </div>
+        <p style={{ margin: '14px 0 0', color: C.mute, fontSize: 13 }}>
+          Enter regular-season per-game averages for this season. Use percentages like <strong style={{ color: C.text }}>46.7</strong> for FG%.
+        </p>
+      </section>
+
+      <form onSubmit={submit}>
+        <div className="grid-stats">
+          {stats.map(def => {
+            const detail = result?.detail?.[def.key]
+            const border = detail ? tierColor(detail.tier) : C.border
+            return (
+              <label key={def.key} style={{
+                background: C.panel, border: `1px solid ${border}`, borderRadius: 14,
+                padding: 14, display: 'flex', flexDirection: 'column', gap: 8,
+                backgroundColor: detail?.tier === 'exact' || detail?.tier === 'close' ? C.goodBg
+                  : detail?.tier === 'miss' ? C.badBg : C.panel,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, letterSpacing: '.04em' }}>{def.short}</span>
+                  {detail && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: tierColor(detail.tier) }}>
+                      {tierLabel(detail.tier)} · {detail.points}/{detail.max}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: C.mute }}>{def.label}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    className="stat-input"
+                    type="number"
+                    inputMode="decimal"
+                    step={def.step}
+                    min={0}
+                    max={def.kind === 'pct' ? 100 : 100}
+                    disabled={!!result}
+                    value={guesses[def.key]}
+                    onChange={e => set(def.key, e.target.value)}
+                    placeholder={def.unit === '%' ? 'e.g. 46.7' : 'e.g. 26.8'}
+                    style={{
+                      flex: 1, padding: '10px 12px', borderRadius: 8,
+                      background: C.bg, border: `1px solid ${C.border}`,
+                      fontSize: 18, fontWeight: 600, width: '100%',
+                    }}
+                  />
+                  {def.unit === '%' && <span style={{ color: C.mute, fontWeight: 700 }}>%</span>}
+                </div>
+                {result && (
+                  <div style={{ fontSize: 13, color: C.mute }}>
+                    Actual: <strong style={{ color: C.text }}>{formatStat(record.stats[def.key], def)}</strong>
+                    {detail?.delta != null && (
+                      <span> · Δ {detail.delta.toFixed(1)}{def.unit}</span>
+                    )}
+                  </div>
+                )}
+              </label>
+            )
           })}
         </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Search</span>
-        <input placeholder="Player name" value={f.q} onChange={e => set({ q: e.target.value })} style={field} />
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Overall</span>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input type="number" placeholder="Min" value={f.min} onChange={e => set({ min: e.target.value })} style={field} />–
-          <input type="number" placeholder="Max" value={f.max} onChange={e => set({ max: e.target.value })} style={field} />
+
+        {STAT_DEFS.some(d => record.stats[d.key] == null) && (
+          <p style={{ margin: '14px 0 0', color: C.mute, fontSize: 13 }}>
+            Some stats were not tracked or are unavailable for this season (shown only when verified). Missing ≠ zero.
+          </p>
+        )}
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 20, alignItems: 'center' }}>
+          {!result ? (
+            <Btn type="submit">Lock in guesses</Btn>
+          ) : (
+            <>
+              <div style={{
+                padding: '10px 16px', borderRadius: 10, background: C.panel2,
+                border: `1px solid ${C.border}`, fontWeight: 700,
+              }}>
+                Round score: <span style={{ color: C.accent }}>{result.points}</span>
+                <span style={{ color: C.mute, fontWeight: 500 }}> / {result.max}</span>
+                <span style={{ color: C.mute, fontWeight: 500 }}> · {result.pct}%</span>
+              </div>
+              <Btn onClick={onNext}>{revealed ? 'Finish' : 'Next player'}</Btn>
+            </>
+          )}
         </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={label}>Min height</span>
-        <select value={f.h} onChange={e => set({ h: e.target.value })} style={field}>
-          <option value="">Any</option>
-          {Array.from({ length: 16 }, (_, i) => 70 + i).map(h => <option key={h} value={h}>{fmtHeight(h)}+</option>)}
-        </select>
-      </div>
-    </aside>
-  )
-}
+      </form>
 
-function Card({ p }) {
-  return (
-    <a href={`#/players/${p.slug}`} className="card" style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ position: 'relative' }}>
-        <Avatar p={p} size={150} fill />
-        <span style={{ position: 'absolute', top: 8, left: 8 }}><Ovr v={p.ovr} /></span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <strong style={{ fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</strong>
-        <span style={{ fontSize: 13, color: C.mute }}>{p.pos} · {p.team}</span>
-        <span style={{ fontSize: 13, color: C.mute }}>{fmtHeight(p.height)}</span>
-      </div>
-    </a>
-  )
-}
-
-function Table({ rows }) {
-  const td = { padding: '10px 12px', borderBottom: `1px solid ${C.border}`, textAlign: 'left', fontSize: 14 }
-  const cols = ['Three-Point Shot', 'Driving Dunk', 'Ball Handle', 'Perimeter Defense', 'Block']
-  return (
-    <div style={{ overflowX: 'auto', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10 }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr>{['OVR', 'Player', 'Pos', 'Team', 'Height', ...cols].map(h => <th key={h} style={{ ...td, color: C.mute, fontSize: 12, textTransform: 'uppercase' }}>{h}</th>)}</tr></thead>
-        <tbody>{rows.map(p => (
-          <tr key={p.id} className="row" style={{ cursor: 'pointer' }} onClick={() => location.hash = `#/players/${p.slug}`}>
-            <td style={td}><Ovr v={p.ovr} /></td><td style={{ ...td, fontWeight: 600 }}>{p.name}</td><td style={td}>{p.pos}</td>
-            <td style={{ ...td, color: C.mute }}>{p.team}</td><td style={td}>{fmtHeight(p.height)}</td>
-            {cols.map(c => <td key={c} style={td}>{p.attrs[c] ?? '—'}</td>)}
-          </tr>))}</tbody>
-      </table>
+      {result && (
+        <div style={{
+          background: C.panel, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16,
+          fontSize: 13, color: C.mute,
+        }}>
+          Source:{' '}
+          <a href={record.sourceUrl} target="_blank" rel="noreferrer">
+            {record.source || 'Basketball Reference'} — {record.player} {formatSeasonDisplay(record.season)}
+          </a>
+          {record.imported && ' (imported)'}
+        </div>
+      )}
     </div>
   )
 }
 
-function Pager({ page, pages, go }) {
-  const [to, setTo] = useState('')
-  const btn = (on, dis) => ({ minWidth: 36, padding: '6px 10px', borderRadius: 6, cursor: dis ? 'default' : 'pointer', opacity: dis ? .4 : 1, border: `1px solid ${on ? C.accent : C.border}`, background: on ? C.accent : C.panel, color: on ? '#111' : C.text, fontWeight: 600 })
-  const nums = [...new Set([1, page - 1, page, page + 1, pages])].filter(n => n >= 1 && n <= pages).sort((a, b) => a - b)
+function Results({ history, totalScore, maxScore, onHome, onReplay }) {
+  const avg = history.length ? Math.round(history.reduce((s, h) => s + h.result.pct, 0) / history.length) : 0
   return (
-    <nav style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
-      <button className="pg" style={btn(false, page === 1)} disabled={page === 1} onClick={() => go(page - 1)}>Previous</button>
-      {nums.map((n, i) => <React.Fragment key={n}>{i && n - nums[i - 1] > 1 ? <span style={{ color: C.mute }}>…</span> : null}
-        <button className="pg" style={btn(n === page)} onClick={() => go(n)}>{n}</button></React.Fragment>)}
-      <button className="pg" style={btn(false, page === pages)} disabled={page === pages} onClick={() => go(page + 1)}>Next</button>
-      <span style={{ marginLeft: 12, color: C.mute, fontSize: 14, display: 'flex', gap: 6, alignItems: 'center' }}>
-        Go to <input value={to} onChange={e => setTo(e.target.value)} style={{ ...field, width: 56 }} /> of {pages}
-        <button className="pg" style={btn(false)} onClick={() => { const n = +to; if (n >= 1 && n <= pages) go(n) }}>Go</button>
-      </span>
-    </nav>
-  )
-}
+    <div className="fade-in" style={{ padding: '32px 0 48px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <section style={{
+        background: C.panel, border: `1px solid ${C.border}`, borderRadius: 18, padding: 28, textAlign: 'center',
+      }}>
+        <Badge color={C.accent}>Game over</Badge>
+        <h2 style={{
+          fontFamily: "'Archivo Black', sans-serif", fontSize: 36, margin: '14px 0 8px',
+        }}>Final score</h2>
+        <div style={{ fontSize: 48, fontWeight: 800, color: C.accent, lineHeight: 1 }}>
+          {totalScore}
+          <span style={{ fontSize: 20, color: C.mute, fontWeight: 600 }}> / {maxScore}</span>
+        </div>
+        <p style={{ color: C.mute, margin: '10px 0 0' }}>Average accuracy {avg}% across {history.length} rounds</p>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 22, flexWrap: 'wrap' }}>
+          <Btn onClick={onReplay}>Play again</Btn>
+          <Btn variant="ghost" onClick={onHome}>Home</Btn>
+        </div>
+      </section>
 
-const empty = { team: '', pos: [], q: '', min: '', max: '', h: '' }
-
-function Browse() {
-  const [f, setF] = useState(empty)
-  const [sort, setSort] = useState('roster')
-  const [view, setView] = useState('grid')
-  const [page, setPage] = useState(1)
-  const set = o => { setF({ ...f, ...o }); setPage(1) }
-
-  const teams = useMemo(() => Object.entries(players.reduce((m, p) => (m[p.team] = (m[p.team] || 0) + 1, m), {})).sort(), [])
-  const rows = useMemo(() => {
-    let r = players.filter(p =>
-      (!f.team || p.team === f.team) &&
-      (!f.pos.length || f.pos.some(x => posList(p.pos).includes(x))) &&
-      p.name.toLowerCase().includes(f.q.toLowerCase()) &&
-      (!f.min || (p.ovr ?? -1) >= +f.min) && (!f.max || (p.ovr != null && p.ovr <= +f.max)) && (!f.h || p.height >= +f.h))
-    const nl = (x, y, d) => x == null ? (y == null ? 0 : 1) : y == null ? -1 : (x - y) * d
-    const by = {
-      'ovr-d': (a, b) => nl(a.ovr, b.ovr, -1), 'ovr-a': (a, b) => nl(a.ovr, b.ovr, 1), name: (a, b) => a.name.localeCompare(b.name),
-      'h-d': (a, b) => b.height - a.height, 'h-a': (a, b) => a.height - b.height,
-    }[sort] || (sort.startsWith('attr:') ? (a, b) => nl(a.attrs[sort.slice(5)], b.attrs[sort.slice(5)], -1) : null)
-    return by ? [...r].sort(by) : r
-  }, [f, sort])
-  const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE))
-  const shown = rows.slice((page - 1) * PER_PAGE, page * PER_PAGE)
-  const active = JSON.stringify(f) !== JSON.stringify(empty)
-
-  return (
-    <>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-        <div style={{ fontSize: 14, color: C.mute }}>MyNBA / Rosters / <span style={{ color: C.text }}>2023-24 Season</span></div>
-        <h1 style={{ margin: 0, fontSize: 32 }}>NBA 2K24 Players · 2023-24 Season</h1>
-        <div style={{ color: C.mute, fontSize: 14 }}>NBA · {players.length} players · {teams.length} teams · 2023-24 season</div>
-      </div>
-      <div className="layout">
-        <Filters f={f} set={set} teams={teams} reset={() => set(empty)} />
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 14 }}><strong>{rows.length.toLocaleString()}</strong> players
-              {!active && <span style={{ color: C.mute }}> · No filters applied — pick a team or position to narrow it down.</span>}</div>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: C.mute }}>Sort</span>
-              <select value={sort} onChange={e => { setSort(e.target.value); setPage(1) }} style={{ ...field, width: 180 }}>
-                {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-              <div style={{ display: 'flex', border: `1px solid ${C.border}`, borderRadius: 6, overflow: 'hidden' }}>
-                {['grid', 'table'].map(v => <button key={v} onClick={() => setView(v)} style={{ padding: '8px 14px', border: 'none', cursor: 'pointer', textTransform: 'capitalize', background: view === v ? C.accent : C.panel, color: view === v ? '#111' : C.text, fontWeight: 600 }}>{v}</button>)}
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 15, color: C.mute, letterSpacing: '.06em', textTransform: 'uppercase' }}>Round breakdown</h3>
+        {history.map((h, i) => (
+          <div key={h.record.id + i} style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: '14px 16px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center',
+          }}>
+            <div style={{ fontWeight: 700, minWidth: 28, color: C.mute }}>#{i + 1}</div>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <div style={{ fontWeight: 700 }}>{h.record.player}</div>
+              <div style={{ fontSize: 13, color: C.mute }}>
+                {formatSeasonDisplay(h.record.season)} · {h.record.team}
               </div>
             </div>
+            <div style={{ fontWeight: 700 }}>
+              {h.result.points}<span style={{ color: C.mute, fontWeight: 500 }}>/{h.result.max}</span>
+            </div>
+            <div style={{ color: h.result.pct >= 70 ? C.good : h.result.pct >= 40 ? C.warn : C.bad, fontWeight: 700, minWidth: 48, textAlign: 'right' }}>
+              {h.result.pct}%
+            </div>
+            <a href={h.record.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>BBR ↗</a>
           </div>
-          {shown.length === 0 ? <p style={{ color: C.mute, textAlign: 'center', padding: 48 }}>No players match these filters.</p>
-            : view === 'grid'
-              ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(174px,1fr))', gap: 12 }}>{shown.map(p => <Card key={p.id} p={p} />)}</div>
-              : <Table rows={shown} />}
-          <Pager page={page} pages={pages} go={n => { setPage(n); scrollTo(0, 0) }} />
-        </section>
-      </div>
-    </>
-  )
-}
-
-function Detail({ slug }) {
-  const p = players.find(x => x.slug === slug)
-  if (!p) return <p>Player not found. <a href="#" style={{ color: C.accent }}>Back to players</a></p>
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div style={{ fontSize: 14, color: C.mute }}><a href="#">MyNBA / Players</a> / <span style={{ color: C.text }}>{p.name}</span></div>
-      <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Avatar p={p} size={140} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h1 style={{ margin: 0, fontSize: 36 }}>{p.name}</h1>
-          <div style={{ color: C.mute }}>{p.pos} · {p.team} · {fmtHeight(p.height)}</div>
-        </div>
-        <div style={{ marginLeft: 'auto' }}><Ovr v={p.ovr} big /></div>
-      </div>
-      <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
-        <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>Attributes</h2>
-        <p style={{ margin: '0 0 20px', color: C.mute, fontSize: 13 }}>Ratings not entered yet show “—”. Fill them in via public/players.csv.</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {Object.entries(GROUPS).map(([g, list]) => (
-            <section key={g} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase', letterSpacing: '.06em', color: C.accent }}>{g}</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: '12px 24px' }}>
-                {list.map(a => (
-                  <div key={a} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{a}</span><strong>{p.attrs[a] ?? '—'}</strong></div>
-                    <div style={{ height: 6, background: C.bg, borderRadius: 3 }}><div style={{ width: `${p.attrs[a] ?? 0}%`, height: '100%', borderRadius: 3, background: tier(p.attrs[a]) }} /></div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      </div>
+        ))}
+      </section>
     </div>
   )
 }
 
 function App() {
-  const h = useHash()
-  const [ready, setReady] = useState(false)
+  const [pool, setPool] = useState([])
+  const [meta, setMeta] = useState(null)
   const [err, setErr] = useState('')
-  useEffect(() => { loadPlayers().then(p => { players = p; setReady(true) }).catch(e => setErr(String(e))) }, [])
-  const m = h.match(/^#\/players\/(.+)$/)
+  const [loading, setLoading] = useState(true)
+  const [screen, setScreen] = useState('home') // home | play | results | import
+  const [mode, setMode] = useState('classic')
+  const [queue, setQueue] = useState([])
+  const [idx, setIdx] = useState(0)
+  const [score, setScore] = useState(0)
+  const [maxScore, setMaxScore] = useState(0)
+  const [streak, setStreak] = useState(0)
+  const [history, setHistory] = useState([])
+  const classicLen = 5
+
+  useEffect(() => {
+    loadSeasons()
+      .then(({ meta, seasons }) => { setMeta(meta); setPool(seasons) })
+      .catch(e => setErr(String(e.message || e)))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const start = useCallback((m) => {
+    if (!pool.length) return
+    const shuffled = shuffle(pool)
+    const q = m === 'classic' ? shuffled.slice(0, Math.min(classicLen, shuffled.length)) : shuffled
+    setMode(m)
+    setQueue(q)
+    setIdx(0)
+    setScore(0)
+    setMaxScore(0)
+    setStreak(0)
+    setHistory([])
+    setScreen('play')
+  }, [pool])
+
+  const onSubmit = (result) => {
+    setScore(s => s + result.points)
+    setMaxScore(m => m + result.max)
+    setStreak(s => (result.pct >= 50 ? s + 1 : 0))
+    setHistory(h => [...h, { record: queue[idx], result }])
+  }
+
+  const onNext = () => {
+    if (idx + 1 >= queue.length) {
+      setScreen('results')
+      return
+    }
+    setIdx(i => i + 1)
+  }
+
+  const onImported = (records) => {
+    setPool(prev => {
+      const map = new Map(prev.map(r => [r.id, r]))
+      for (const r of records) map.set(r.id, r)
+      return [...map.values()]
+    })
+  }
+
+  const record = queue[idx]
+  const modeLabel = screen === 'play'
+    ? (mode === 'classic' ? 'Classic' : 'Endless')
+    : screen === 'results' ? 'Results' : null
+
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div className="court-bg" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <style>{css}</style>
-      <Header />
-      <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>{err ? <p style={{ color: '#f87171' }}>Couldn't load players.csv: {err}</p> : !ready ? <p style={{ color: C.mute }}>Loading players…</p> : m ? <Detail slug={m[1]} /> : <Browse />}</main>
+      <Header onHome={() => setScreen('home')} mode={modeLabel} />
+      <main style={{ flex: 1, maxWidth: 960, width: '100%', margin: '0 auto', padding: '0 20px' }}>
+        {loading && (
+          <p className="pulse" style={{ color: C.mute, textAlign: 'center', padding: 64 }}>Loading verified seasons…</p>
+        )}
+        {err && (
+          <p style={{ color: C.bad, padding: 32, textAlign: 'center' }}>
+            Couldn&apos;t load stats: {err}
+          </p>
+        )}
+        {!loading && !err && screen === 'home' && (
+          <Home count={pool.length} onStart={start} onImport={() => setScreen('import')} />
+        )}
+        {!loading && screen === 'import' && (
+          <ImportPanel onClose={() => setScreen('home')} onImported={onImported} />
+        )}
+        {!loading && screen === 'play' && record && (
+          <GameRound
+            key={record.id + '-' + idx}
+            record={record}
+            round={idx + 1}
+            total={mode === 'classic' ? queue.length : 0}
+            score={score}
+            streak={streak}
+            onSubmit={onSubmit}
+            onNext={onNext}
+            revealed={idx + 1 >= queue.length}
+          />
+        )}
+        {!loading && screen === 'results' && (
+          <Results
+            history={history}
+            totalScore={score}
+            maxScore={maxScore}
+            onHome={() => setScreen('home')}
+            onReplay={() => start(mode)}
+          />
+        )}
+      </main>
       <Footer />
     </div>
   )
